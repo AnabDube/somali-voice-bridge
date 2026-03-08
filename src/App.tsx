@@ -13,6 +13,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 import Transcript from "./pages/Transcript";
+import Pricing from "./pages/Pricing";
 
 const queryClient = new QueryClient();
 
