@@ -1,4 +1,5 @@
-import { FileAudio, Calendar, Clock, Trash2 } from "lucide-react";
+import { FileAudio, Calendar, Clock, Trash2, Eye, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -40,6 +41,7 @@ const formatFileSize = (bytes: number | null) => {
 };
 
 const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
+  const navigate = useNavigate();
   if (uploads.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center shadow-card">
@@ -80,6 +82,18 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
                 </div>
               </div>
               <Badge variant={cfg.variant} className="shrink-0">{cfg.label}</Badge>
+              {upload.status === "processing" ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 gap-1.5 text-xs"
+                  onClick={() => navigate(`/transcript/${upload.id}`)}
+                >
+                  <Eye className="h-3.5 w-3.5" /> View
+                </Button>
+              )}
               {onDelete && (
                 <Button
                   variant="ghost"
