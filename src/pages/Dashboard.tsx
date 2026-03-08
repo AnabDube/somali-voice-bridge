@@ -81,7 +81,7 @@ const Dashboard = () => {
         URL.revokeObjectURL(audio.src);
       });
       audio.addEventListener("error", () => {
-        resolve(0); // Can't determine duration, let backend enforce
+        resolve(0);
         URL.revokeObjectURL(audio.src);
       });
       audio.src = URL.createObjectURL(file);
@@ -96,7 +96,6 @@ const Dashboard = () => {
       return;
     }
 
-    // Pre-check: estimate file duration against remaining minutes
     const durationSec = await getAudioDuration(file);
     if (durationSec > 0) {
       const durationMin = Math.ceil(durationSec / 60);
@@ -112,14 +111,12 @@ const Dashboard = () => {
     const filePath = `${user.id}/${Date.now()}-${file.name}`;
 
     try {
-      // 1. Upload to storage
       const { error: storageError } = await supabase.storage
         .from("audio-uploads")
         .upload(filePath, file, { contentType: file.type });
 
       if (storageError) throw storageError;
 
-      // 2. Create database record
       const { data: insertData, error: dbError } = await supabase
         .from("audio_uploads")
         .insert({
@@ -137,7 +134,6 @@ const Dashboard = () => {
       toast.success(`"${file.name}" uploaded — transcription starting…`);
       await fetchUploads();
 
-      // 3. Trigger transcription
       if (insertData?.id) {
         setUploads((prev) =>
           prev.map((u) => (u.id === insertData.id ? { ...u, status: "processing" } : u))
@@ -168,7 +164,6 @@ const Dashboard = () => {
           return;
         }
 
-        // Chain translation if transcription succeeded
         if (fnData?.transcription_id) {
           const { error: tlErr } = await supabase.functions
             .invoke("translate-text", {
@@ -198,7 +193,6 @@ const Dashboard = () => {
 
     try {
       await supabase.storage.from("audio-uploads").remove([upload.file_path]);
-      // Cascade delete will remove associated transcriptions
       const { error } = await supabase.from("audio_uploads").delete().eq("id", id);
       if (error) throw error;
 
@@ -219,12 +213,10 @@ const Dashboard = () => {
           </h2>
         )}
 
-        {/* Usage bar */}
         <div className="mb-6">
           <UsageBar minutesUsed={minutesUsed} minutesLimit={minutesLimit} plan={plan} />
         </div>
 
-        {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatsCard
             icon={Clock}
@@ -238,7 +230,6 @@ const Dashboard = () => {
           <StatsCard icon={Zap} label="Plan" value={planLabels[plan] || "Free"} subtext="Upgrade for more" />
         </div>
 
-        {/* Credit warnings */}
         {!hasCredits && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
             <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" />
@@ -262,7 +253,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Upload */}
         <div className="mb-8">
           <AudioUploader
             onFileSelected={handleFileSelected}
@@ -271,7 +261,6 @@ const Dashboard = () => {
           />
         </div>
 
-        {/* Recent Uploads */}
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-display text-sm font-semibold">Recent Uploads</h3>
           <Button variant="ghost" size="sm" className="gap-1.5 text-xs" asChild>

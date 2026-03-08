@@ -1,10 +1,11 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Mic, Menu, X, LogOut } from "lucide-react";
+import { Mic, Menu, X, LogOut, Settings } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -45,9 +46,13 @@ const Navbar = () => {
               {link.label}
             </Link>
           ))}
+          <ThemeToggle />
           {user ? (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">{profile?.display_name || user.email}</span>
+              <Button variant="ghost" size="icon" onClick={() => navigate("/settings")} title="Settings">
+                <Settings className="h-4 w-4" />
+              </Button>
               <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign out">
                 <LogOut className="h-4 w-4" />
               </Button>
@@ -64,9 +69,12 @@ const Navbar = () => {
           )}
         </div>
 
-        <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-2 md:hidden">
+          <ThemeToggle />
+          <button onClick={() => setMobileOpen(!mobileOpen)}>
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -84,9 +92,14 @@ const Navbar = () => {
                 </Link>
               ))}
               {user ? (
-                <Button variant="outline" size="sm" onClick={() => { handleSignOut(); setMobileOpen(false); }}>
-                  Sign Out
-                </Button>
+                <>
+                  <Link to="/settings" className="text-sm font-medium" onClick={() => setMobileOpen(false)}>
+                    Settings
+                  </Link>
+                  <Button variant="outline" size="sm" onClick={() => { handleSignOut(); setMobileOpen(false); }}>
+                    Sign Out
+                  </Button>
+                </>
               ) : (
                 <>
                   <Button variant="outline" size="sm" asChild>
