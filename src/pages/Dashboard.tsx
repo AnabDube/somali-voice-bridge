@@ -50,6 +50,18 @@ const Dashboard = () => {
     fetchUploads();
   }, [fetchUploads]);
 
+  // Poll for status updates when any upload is processing
+  useEffect(() => {
+    const hasProcessing = uploads.some((u) => u.status === "processing");
+    if (!hasProcessing) return;
+
+    const interval = setInterval(() => {
+      fetchUploads();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [uploads, fetchUploads]);
+
   const handleFileSelected = async (file: File) => {
     if (!user) return;
 
