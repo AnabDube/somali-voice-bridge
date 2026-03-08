@@ -4,6 +4,7 @@ import Navbar from "@/components/Navbar";
 import AudioUploader from "@/components/AudioUploader";
 import RecentUploads from "@/components/RecentUploads";
 import StatsCard from "@/components/StatsCard";
+import UsageBar from "@/components/UsageBar";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -181,6 +182,11 @@ const Dashboard = () => {
             Welcome, {profile.display_name || "there"} 👋
           </h2>
         )}
+
+        {/* Usage bar */}
+        <div className="mb-6">
+          <UsageBar minutesUsed={minutesUsed} minutesLimit={minutesLimit} plan={plan} />
+        </div>
 
         {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
