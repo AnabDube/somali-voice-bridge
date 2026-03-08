@@ -12,9 +12,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-  if (!OPENAI_API_KEY) {
-    return new Response(JSON.stringify({ error: "OPENAI_API_KEY not configured" }), {
+  const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
+  if (!ELEVENLABS_API_KEY) {
+    return new Response(JSON.stringify({ error: "ELEVENLABS_API_KEY not configured" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -55,7 +55,6 @@ serve(async (req) => {
       });
     }
 
-    // Use service role for DB operations
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // Verify the upload belongs to user
@@ -92,37 +91,42 @@ serve(async (req) => {
       });
     }
 
-    // Determine file extension for Whisper
+    // Send to ElevenLabs Speech-to-Text API
     const fileName = upload.file_name || "audio.wav";
-
-    // Send to Whisper API
     const formData = new FormData();
     formData.append("file", new File([fileData], fileName, { type: fileData.type }));
-    formData.append("model", "whisper-1");
-    formData.append("language", "so"); // Somali
-    formData.append("response_format", "verbose_json");
+    formData.append("model_id", "scribe_v2");
+    formData.append("language_code", "som"); // Somali ISO 639-3
+    formData.append("tag_audio_events", "false");
+    formData.append("diarize", "false");
 
-    const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    const sttResp = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "xi-api-key": ELEVENLABS_API_KEY,
       },
       body: formData,
     });
 
-    if (!whisperResp.ok) {
-      const errText = await whisperResp.text();
-      console.error("Whisper API error:", whisperResp.status, errText);
+    if (!sttResp.ok) {
+      const errText = await sttResp.text();
+      console.error("ElevenLabs STT error:", sttResp.status, errText);
       await adminClient.from("audio_uploads").update({ status: "failed" }).eq("id", upload_id);
-      return new Response(JSON.stringify({ error: `Whisper API error: ${whisperResp.status}` }), {
+      return new Response(JSON.stringify({ error: `ElevenLabs STT error: ${sttResp.status}` }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const whisperResult = await whisperResp.json();
-    const somaliText = whisperResult.text || "";
-    const duration = whisperResult.duration || null;
+    const sttResult = await sttResp.json();
+    const somaliText = sttResult.text || "";
+
+    // Calculate duration from word timestamps if available
+    let duration = null;
+    if (sttResult.words && sttResult.words.length > 0) {
+      const lastWord = sttResult.words[sttResult.words.length - 1];
+      duration = lastWord.end || null;
+    }
 
     // Save transcription
     const { error: insertErr } = await adminClient.from("transcriptions").insert({
