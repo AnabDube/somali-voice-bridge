@@ -183,6 +183,11 @@ const Dashboard = () => {
           </h2>
         )}
 
+        {/* Usage bar */}
+        <div className="mb-6">
+          <UsageBar minutesUsed={minutesUsed} minutesLimit={minutesLimit} plan={plan} />
+        </div>
+
         {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatsCard
