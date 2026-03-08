@@ -64,6 +64,41 @@
     --shadow-card: 0 1px 3px hsl(220 25% 10% / 0.06), 0 4px 12px hsl(220 25% 10% / 0.04);
     --shadow-elevated: 0 4px 24px hsl(220 25% 10% / 0.08), 0 1px 4px hsl(220 25% 10% / 0.04);
   }
+
+  .dark {
+    --background: 220 25% 8%;
+    --foreground: 40 15% 90%;
+
+    --card: 220 20% 12%;
+    --card-foreground: 40 15% 90%;
+
+    --popover: 220 25% 10%;
+    --popover-foreground: 40 15% 90%;
+
+    --primary: 38 92% 50%;
+    --primary-foreground: 220 25% 10%;
+
+    --secondary: 180 35% 40%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 15% 18%;
+    --muted-foreground: 40 10% 60%;
+
+    --accent: 180 20% 18%;
+    --accent-foreground: 180 30% 70%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 20%;
+    --input: 220 15% 20%;
+    --ring: 38 92% 50%;
+
+    --surface-elevated: 220 20% 14%;
+    --shadow-soft: 0 2px 20px -4px hsl(38 92% 50% / 0.1);
+    --shadow-card: 0 1px 3px hsl(0 0% 0% / 0.2), 0 4px 12px hsl(0 0% 0% / 0.15);
+    --shadow-elevated: 0 4px 24px hsl(0 0% 0% / 0.25), 0 1px 4px hsl(0 0% 0% / 0.1);
+  }
 }
 
 @layer base {
