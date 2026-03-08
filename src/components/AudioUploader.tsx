@@ -11,9 +11,10 @@ const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
 interface AudioUploaderProps {
   onFileSelected: (file: File) => void;
   isUploading?: boolean;
+  disabled?: boolean;
 }
 
-const AudioUploader = ({ onFileSelected, isUploading }: AudioUploaderProps) => {
+const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -36,18 +37,19 @@ const AudioUploader = ({ onFileSelected, isUploading }: AudioUploaderProps) => {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (disabled) return;
     const file = e.dataTransfer.files[0];
     if (file && validateFile(file)) {
       onFileSelected(file);
     }
-  }, [onFileSelected]);
+  }, [onFileSelected, disabled]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     const file = e.target.files?.[0];
     if (file && validateFile(file)) {
       onFileSelected(file);
     }
-    // Reset so same file can be re-selected
     e.target.value = "";
   };
 

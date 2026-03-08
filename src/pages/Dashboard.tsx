@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Clock, FileAudio, Languages, Zap } from "lucide-react";
+import { Clock, FileAudio, Languages, Zap, AlertTriangle } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import AudioUploader from "@/components/AudioUploader";
 import RecentUploads from "@/components/RecentUploads";
@@ -28,7 +28,7 @@ interface AudioUploadRow {
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const { profile } = useProfile();
+  const { profile, refetch: refetchProfile } = useProfile();
   const [uploads, setUploads] = useState<AudioUploadRow[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -57,13 +57,26 @@ const Dashboard = () => {
 
     const interval = setInterval(() => {
       fetchUploads();
+      refetchProfile?.();
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [uploads, fetchUploads]);
+  }, [uploads, fetchUploads, refetchProfile]);
+
+  const minutesUsed = profile?.minutes_used ?? 0;
+  const minutesLimit = profile?.minutes_limit ?? 30;
+  const minutesRemaining = Math.max(0, minutesLimit - minutesUsed);
+  const plan = profile?.subscription_plan ?? "free";
+  const hasCredits = minutesRemaining > 0;
+  const isLowCredits = minutesRemaining > 0 && minutesRemaining <= 5;
 
   const handleFileSelected = async (file: File) => {
     if (!user) return;
+
+    if (!hasCredits) {
+      toast.error("Transcription cannot proceed. No free credits available. Please add credits to continue.");
+      return;
+    }
 
     setIsUploading(true);
     const filePath = `${user.id}/${Date.now()}-${file.name}`;
@@ -95,11 +108,7 @@ const Dashboard = () => {
       await fetchUploads();
 
       // 3. Trigger transcription
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      if (accessToken && insertData?.id) {
-        // Update status locally
+      if (insertData?.id) {
         setUploads((prev) =>
           prev.map((u) => (u.id === insertData.id ? { ...u, status: "processing" } : u))
         );
@@ -108,12 +117,24 @@ const Dashboard = () => {
           .invoke("transcribe-audio", {
             body: { upload_id: insertData.id },
           })
-          .then(({ error: fnErr }) => {
+          .then(({ data: fnData, error: fnErr }) => {
             if (fnErr) {
               console.error("Transcription function error:", fnErr);
+              // Check if it's a credits issue
+              try {
+                const parsed = typeof fnErr === "object" ? fnErr : JSON.parse(String(fnErr));
+                if (parsed?.context?.body) {
+                  const body = JSON.parse(parsed.context.body);
+                  if (body.error === "no_credits") {
+                    toast.error(body.message);
+                  }
+                }
+              } catch {
+                // generic error
+              }
             }
-            // Refresh uploads to get latest status
             fetchUploads();
+            refetchProfile?.();
           });
       }
     } catch (err: any) {
@@ -129,9 +150,7 @@ const Dashboard = () => {
     if (!upload) return;
 
     try {
-      // Delete from storage
       await supabase.storage.from("audio-uploads").remove([upload.file_path]);
-      // Delete from database
       const { error } = await supabase.from("audio_uploads").delete().eq("id", id);
       if (error) throw error;
 
@@ -141,10 +160,6 @@ const Dashboard = () => {
       toast.error(err.message || "Failed to delete");
     }
   };
-
-  const minutesUsed = profile?.minutes_used ?? 0;
-  const minutesLimit = profile?.minutes_limit ?? 30;
-  const plan = profile?.subscription_plan ?? "free";
 
   return (
     <div className="min-h-screen bg-background">
@@ -158,15 +173,49 @@ const Dashboard = () => {
 
         {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatsCard icon={Clock} label="Minutes Used" value={`${minutesUsed}`} subtext={`of ${minutesLimit} min`} />
+          <StatsCard
+            icon={Clock}
+            label="Minutes Remaining"
+            value={`${minutesRemaining}`}
+            subtext={`of ${minutesLimit} min`}
+            highlight={!hasCredits ? "danger" : isLowCredits ? "warning" : undefined}
+          />
           <StatsCard icon={FileAudio} label="Files Uploaded" value={`${uploads.length}`} />
-          <StatsCard icon={Languages} label="Words Translated" value="—" />
+          <StatsCard icon={Languages} label="Minutes Used" value={`${minutesUsed}`} />
           <StatsCard icon={Zap} label="Plan" value={planLabels[plan] || "Free"} subtext="Upgrade for more" />
         </div>
 
+        {/* Credit warnings */}
+        {!hasCredits && (
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <p className="text-sm font-semibold text-destructive">No credits remaining</p>
+              <p className="text-xs text-muted-foreground">
+                Transcription cannot proceed. Please upgrade your plan or add credits to continue.
+              </p>
+            </div>
+          </div>
+        )}
+        {isLowCredits && (
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 p-4">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-accent-foreground" />
+            <div>
+              <p className="text-sm font-semibold text-accent-foreground">Low credits</p>
+              <p className="text-xs text-muted-foreground">
+                You have only {minutesRemaining} minute{minutesRemaining !== 1 ? "s" : ""} remaining. Consider upgrading your plan.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Upload */}
         <div className="mb-8">
-          <AudioUploader onFileSelected={handleFileSelected} isUploading={isUploading} />
+          <AudioUploader
+            onFileSelected={handleFileSelected}
+            isUploading={isUploading}
+            disabled={!hasCredits}
+          />
         </div>
 
         {/* Recent Uploads */}
