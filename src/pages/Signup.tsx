@@ -56,8 +56,8 @@ const Signup = () => {
 
         <form onSubmit={handleSignup} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Display Name</Label>
-            <Input id="name" placeholder="Your name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
+            <Label htmlFor="name">Username</Label>
+            <Input id="name" placeholder="Choose a username" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
