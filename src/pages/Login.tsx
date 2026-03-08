@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Mic, ArrowLeft, Loader2 } from "lucide-react";
+import { Mic, ArrowLeft, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 const Login = () => {
@@ -12,20 +12,40 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [showResend, setShowResend] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setShowResend(false);
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
+      if (error.message.toLowerCase().includes("email not confirmed")) {
+        setShowResend(true);
+      }
       toast.error(error.message);
     } else {
       toast.success("Welcome back!");
       navigate("/dashboard");
     }
     setLoading(false);
+  };
+
+  const handleResendVerification = async () => {
+    setResending(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+    });
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Verification email sent! Check your inbox.");
+    }
+    setResending(false);
   };
 
   return (
@@ -58,6 +78,24 @@ const Login = () => {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In"}
           </Button>
         </form>
+
+        {showResend && (
+          <div className="mt-4 rounded-lg border border-border bg-muted/50 p-4 text-center">
+            <p className="text-sm text-muted-foreground mb-2">
+              Your email hasn't been verified yet.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleResendVerification}
+              disabled={resending}
+            >
+              {resending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+              Resend Verification Email
+            </Button>
+          </div>
+        )}
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don't have an account?{" "}

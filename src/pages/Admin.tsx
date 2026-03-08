@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
-import { Users, FileAudio, Clock, ShieldCheck } from "lucide-react";
+import { Users, FileAudio, Clock, ShieldCheck, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import Navbar from "@/components/Navbar";
 import StatsCard from "@/components/StatsCard";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,12 +32,20 @@ interface UploadSummary {
   transcription_count: number;
 }
 
+const planLimits: Record<string, number> = {
+  free: 30,
+  starter: 120,
+  professional: 300,
+  business: 9999,
+};
+
 const Admin = () => {
   const { user } = useAuth();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [uploadSummary, setUploadSummary] = useState<Map<string, UploadSummary>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [updatingUser, setUpdatingUser] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -44,51 +60,96 @@ const Admin = () => {
     checkAdmin();
   }, [user]);
 
+  const fetchData = async () => {
+    setLoading(true);
+
+    const { data: profiles, error: profErr } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (profErr) {
+      toast.error("Failed to load users");
+      setLoading(false);
+      return;
+    }
+
+    setUsers((profiles ?? []) as UserRow[]);
+
+    const { data: uploads } = await supabase
+      .from("audio_uploads")
+      .select("user_id, id");
+
+    const { data: transcriptions } = await supabase
+      .from("transcriptions")
+      .select("user_id, id");
+
+    const summary = new Map<string, UploadSummary>();
+    (uploads ?? []).forEach((u) => {
+      const existing = summary.get(u.user_id) || { user_id: u.user_id, upload_count: 0, transcription_count: 0 };
+      existing.upload_count++;
+      summary.set(u.user_id, existing);
+    });
+    (transcriptions ?? []).forEach((t) => {
+      const existing = summary.get(t.user_id) || { user_id: t.user_id, upload_count: 0, transcription_count: 0 };
+      existing.transcription_count++;
+      summary.set(t.user_id, existing);
+    });
+
+    setUploadSummary(summary);
+    setLoading(false);
+  };
+
   useEffect(() => {
     if (!isAdmin) return;
-    const fetchData = async () => {
-      setLoading(true);
-
-      // Fetch all profiles (admin RLS policy allows this)
-      const { data: profiles, error: profErr } = await supabase
-        .from("profiles")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (profErr) {
-        toast.error("Failed to load users");
-        setLoading(false);
-        return;
-      }
-
-      setUsers((profiles ?? []) as UserRow[]);
-
-      // Fetch upload counts per user
-      const { data: uploads } = await supabase
-        .from("audio_uploads")
-        .select("user_id, id");
-
-      const { data: transcriptions } = await supabase
-        .from("transcriptions")
-        .select("user_id, id");
-
-      const summary = new Map<string, UploadSummary>();
-      (uploads ?? []).forEach((u) => {
-        const existing = summary.get(u.user_id) || { user_id: u.user_id, upload_count: 0, transcription_count: 0 };
-        existing.upload_count++;
-        summary.set(u.user_id, existing);
-      });
-      (transcriptions ?? []).forEach((t) => {
-        const existing = summary.get(t.user_id) || { user_id: t.user_id, upload_count: 0, transcription_count: 0 };
-        existing.transcription_count++;
-        summary.set(t.user_id, existing);
-      });
-
-      setUploadSummary(summary);
-      setLoading(false);
-    };
     fetchData();
   }, [isAdmin]);
+
+  const handlePlanChange = async (userId: string, newPlan: string) => {
+    setUpdatingUser(userId);
+    const newLimit = planLimits[newPlan] || 30;
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        subscription_plan: newPlan as any,
+        minutes_limit: newLimit,
+      })
+      .eq("user_id", userId);
+
+    if (error) {
+      toast.error("Failed to update plan");
+    } else {
+      toast.success(`Plan updated to ${newPlan}`);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.user_id === userId
+            ? { ...u, subscription_plan: newPlan, minutes_limit: newLimit }
+            : u
+        )
+      );
+    }
+    setUpdatingUser(null);
+  };
+
+  const handleResetUsage = async (userId: string) => {
+    setUpdatingUser(userId);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ minutes_used: 0 })
+      .eq("user_id", userId);
+
+    if (error) {
+      toast.error("Failed to reset usage");
+    } else {
+      toast.success("Usage reset to 0");
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.user_id === userId ? { ...u, minutes_used: 0 } : u
+        )
+      );
+    }
+    setUpdatingUser(null);
+  };
 
   if (isAdmin === null) {
     return (
@@ -156,11 +217,13 @@ const Admin = () => {
                     <th className="px-5 py-3 font-medium">Usage</th>
                     <th className="px-5 py-3 font-medium">Uploads</th>
                     <th className="px-5 py-3 font-medium">Transcriptions</th>
+                    <th className="px-5 py-3 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {users.map((u) => {
                     const s = uploadSummary.get(u.user_id);
+                    const isUpdating = updatingUser === u.user_id;
                     return (
                       <tr key={u.id} className="hover:bg-muted/30">
                         <td className="px-5 py-3">
@@ -168,15 +231,38 @@ const Admin = () => {
                           <p className="text-xs text-muted-foreground">{u.email}</p>
                         </td>
                         <td className="px-5 py-3">
-                          <Badge variant={planVariant[u.subscription_plan] || "outline"}>
-                            {u.subscription_plan}
-                          </Badge>
+                          <Select
+                            value={u.subscription_plan}
+                            onValueChange={(val) => handlePlanChange(u.user_id, val)}
+                            disabled={isUpdating}
+                          >
+                            <SelectTrigger className="h-8 w-[130px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="free">Free</SelectItem>
+                              <SelectItem value="starter">Starter</SelectItem>
+                              <SelectItem value="professional">Pro</SelectItem>
+                              <SelectItem value="business">Business</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </td>
                         <td className="px-5 py-3">
                           {u.minutes_used} / {u.minutes_limit} min
                         </td>
                         <td className="px-5 py-3">{s?.upload_count ?? 0}</td>
                         <td className="px-5 py-3">{s?.transcription_count ?? 0}</td>
+                        <td className="px-5 py-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5 text-xs"
+                            disabled={isUpdating || u.minutes_used === 0}
+                            onClick={() => handleResetUsage(u.user_id)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" /> Reset Usage
+                          </Button>
+                        </td>
                       </tr>
                     );
                   })}

@@ -1,7 +1,19 @@
+import { useState } from "react";
 import { FileAudio, Calendar, Clock, Trash2, Eye, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 
 interface AudioUpload {
@@ -16,7 +28,7 @@ interface AudioUpload {
 
 interface RecentUploadsProps {
   uploads: AudioUpload[];
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => Promise<void> | void;
 }
 
 const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -42,6 +54,18 @@ const formatFileSize = (bytes: number | null) => {
 
 const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
   const navigate = useNavigate();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (id: string) => {
+    if (!onDelete) return;
+    setDeletingId(id);
+    try {
+      await onDelete(id);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   if (uploads.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center shadow-card">
@@ -60,6 +84,7 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
       <div className="divide-y divide-border">
         {uploads.map((upload) => {
           const cfg = statusConfig[upload.status] || statusConfig.pending;
+          const isDeleting = deletingId === upload.id;
           return (
             <div key={upload.id} className="flex items-center gap-4 px-5 py-3.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -81,7 +106,7 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
                   )}
                 </div>
               </div>
-              <Badge variant={cfg.variant} className="shrink-0">{cfg.label}</Badge>
+              <Badge variant={cfg.variant}>{cfg.label}</Badge>
               {upload.status === "processing" ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
               ) : upload.status === "completed" ? (
@@ -104,14 +129,39 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
                 </Button>
               )}
               {onDelete && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => onDelete(upload.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      disabled={isDeleting}
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete recording?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete "{upload.file_name}" and its transcript. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => handleDelete(upload.id)}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               )}
             </div>
           );

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
-  Download, FileText, FileType, AlertCircle, ShieldAlert,
+  Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Navbar";
@@ -24,6 +24,44 @@ const Transcript = () => {
   const [copiedSomali, setCopiedSomali] = useState(false);
   const [copiedEnglish, setCopiedEnglish] = useState(false);
   const [translationFailed, setTranslationFailed] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval>>();
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = undefined;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      const { data: t } = await supabase
+        .from("transcriptions")
+        .select("*")
+        .eq("upload_id", uploadId!)
+        .single();
+      if (t) {
+        setTranscription(t);
+        if (t.english_text) {
+          stopPolling();
+        }
+      }
+
+      const { data: uploadData } = await supabase
+        .from("audio_uploads")
+        .select("status")
+        .eq("id", uploadId!)
+        .single();
+      if (uploadData) {
+        setUpload((prev: any) => (prev ? { ...prev, status: uploadData.status } : prev));
+        if (uploadData.status === "failed") stopPolling();
+      }
+    }, 3000);
+  }, [uploadId, stopPolling]);
 
   useEffect(() => {
     if (!uploadId || !user) return;
@@ -42,8 +80,6 @@ const Transcript = () => {
         return;
       }
 
-      // RLS will prevent non-owners from seeing the upload,
-      // but double-check ownership
       if (uploadData.user_id !== user.id) {
         setAccessDenied(true);
         setLoading(false);
@@ -51,6 +87,12 @@ const Transcript = () => {
       }
 
       setUpload(uploadData);
+
+      // Get signed URL for audio playback
+      const { data: signedData } = await supabase.storage
+        .from("audio-uploads")
+        .createSignedUrl(uploadData.file_path, 3600);
+      if (signedData?.signedUrl) setAudioUrl(signedData.signedUrl);
 
       const { data: t } = await supabase
         .from("transcriptions")
@@ -60,35 +102,17 @@ const Transcript = () => {
 
       if (t) setTranscription(t);
       setLoading(false);
+
+      // Start polling if still processing or awaiting translation
+      if (uploadData.status === "processing" || (t?.somali_text && !t?.english_text)) {
+        startPolling();
+      }
     };
 
     fetchData();
 
-    // Poll for status changes
-    const interval = setInterval(async () => {
-      const { data: uploadData } = await supabase
-        .from("audio_uploads")
-        .select("status")
-        .eq("id", uploadId)
-        .single();
-
-      if (uploadData?.status === "completed" || uploadData?.status === "failed") {
-        const { data: t } = await supabase
-          .from("transcriptions")
-          .select("*")
-          .eq("upload_id", uploadId)
-          .single();
-        if (t) setTranscription(t);
-        setUpload((prev: any) => (prev ? { ...prev, status: uploadData.status } : prev));
-
-        if (uploadData.status === "failed" || t?.english_text) {
-          clearInterval(interval);
-        }
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [uploadId, user]);
+    return () => stopPolling();
+  }, [uploadId, user, startPolling, stopPolling]);
 
   const handleRetryTranslation = async () => {
     if (!transcription?.id) return;
@@ -100,14 +124,19 @@ const Transcript = () => {
       setTranslationFailed(true);
       toast.error("Translation failed. Please try again.");
     } else {
-      const { data: t } = await supabase
-        .from("transcriptions")
-        .select("*")
-        .eq("upload_id", uploadId)
-        .single();
-      if (t) setTranscription(t);
-      if (!t?.english_text) setTranslationFailed(true);
+      // Start polling for the translation result
+      startPolling();
     }
+  };
+
+  const togglePlayback = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
   };
 
   const userName = profile?.display_name?.replace(/\s+/g, "_") || "user";
@@ -201,6 +230,29 @@ const Transcript = () => {
                 <p className="text-sm text-muted-foreground">Transcript & Translation</p>
               </div>
             </div>
+
+            {/* Audio Player */}
+            {audioUrl && (
+              <div className="mb-6 flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-card">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-10 w-10 shrink-0"
+                  onClick={togglePlayback}
+                >
+                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </Button>
+                <audio
+                  ref={audioRef}
+                  src={audioUrl}
+                  onEnded={() => setIsPlaying(false)}
+                  onPause={() => setIsPlaying(false)}
+                  onPlay={() => setIsPlaying(true)}
+                  className="w-full"
+                  controls
+                />
+              </div>
+            )}
 
             {isProcessing ? (
               <div className="rounded-xl border border-border bg-card p-12 text-center shadow-card">

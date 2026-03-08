@@ -1,4 +1,4 @@
-import { Check, Zap, Building2, Star } from "lucide-react";
+import { Check, Zap, Building2, Star, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +25,23 @@ const plans = [
     popular: false,
   },
   {
+    id: "starter" as const,
+    name: "Starter",
+    price: "$5",
+    period: "/month",
+    minutes: 120,
+    icon: Rocket,
+    features: [
+      "120 minutes/month",
+      "Everything in Free",
+      "Faster processing",
+      "Upload history",
+      "Email support",
+    ],
+    cta: "Upgrade to Starter",
+    popular: false,
+  },
+  {
     id: "professional" as const,
     name: "Pro",
     price: "$10",
@@ -33,10 +50,10 @@ const plans = [
     icon: Star,
     features: [
       "300 minutes/month",
-      "Everything in Free",
+      "Everything in Starter",
       "Priority processing",
       "Speaker timestamps",
-      "Email support",
+      "Priority support",
     ],
     cta: "Upgrade to Pro",
     popular: true,
@@ -86,7 +103,7 @@ const Pricing = () => {
           </p>
         </div>
 
-        <div className="mx-auto mt-12 grid max-w-5xl gap-6 md:grid-cols-3">
+        <div className="mx-auto mt-12 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {plans.map((plan) => {
             const isCurrent = currentPlan === plan.id;
             return (
