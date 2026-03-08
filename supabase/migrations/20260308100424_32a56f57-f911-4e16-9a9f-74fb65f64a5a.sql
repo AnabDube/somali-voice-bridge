@@ -1,0 +1,1 @@
+ALTER TABLE public.audio_uploads DROP CONSTRAINT IF EXISTS audio_uploads_status_check;
