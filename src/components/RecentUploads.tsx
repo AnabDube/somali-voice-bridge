@@ -22,7 +22,7 @@ interface RecentUploadsProps {
 const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   uploaded: { label: "Uploaded", variant: "outline" },
   processing: { label: "Processing", variant: "secondary" },
-  completed: { label: "Completed", variant: "default" },
+  completed: { label: "Ready", variant: "default" },
   failed: { label: "Failed", variant: "destructive" },
   pending: { label: "Uploaded", variant: "outline" },
 };
