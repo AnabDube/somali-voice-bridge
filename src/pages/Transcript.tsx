@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
-  Download, FileText, FileType, AlertCircle,
+  Download, FileText, FileType, AlertCircle, ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -14,8 +15,10 @@ import jsPDF from "jspdf";
 const Transcript = () => {
   const { uploadId } = useParams<{ uploadId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { profile } = useProfile();
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [upload, setUpload] = useState<any>(null);
   const [transcription, setTranscription] = useState<any>(null);
   const [copiedSomali, setCopiedSomali] = useState(false);
@@ -23,22 +26,45 @@ const Transcript = () => {
   const [translationFailed, setTranslationFailed] = useState(false);
 
   useEffect(() => {
-    if (!uploadId) return;
+    if (!uploadId || !user) return;
 
     const fetchData = async () => {
       setLoading(true);
-      const [uploadRes, transcriptRes] = await Promise.all([
-        supabase.from("audio_uploads").select("*").eq("id", uploadId).single(),
-        supabase.from("transcriptions").select("*").eq("upload_id", uploadId).single(),
-      ]);
-      if (uploadRes.data) setUpload(uploadRes.data);
-      if (transcriptRes.data) setTranscription(transcriptRes.data);
+      const { data: uploadData, error: uploadErr } = await supabase
+        .from("audio_uploads")
+        .select("*")
+        .eq("id", uploadId)
+        .single();
+
+      if (uploadErr || !uploadData) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+
+      // RLS will prevent non-owners from seeing the upload,
+      // but double-check ownership
+      if (uploadData.user_id !== user.id) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+
+      setUpload(uploadData);
+
+      const { data: t } = await supabase
+        .from("transcriptions")
+        .select("*")
+        .eq("upload_id", uploadId)
+        .single();
+
+      if (t) setTranscription(t);
       setLoading(false);
     };
 
     fetchData();
 
-    // Poll for status changes (transcription + translation)
+    // Poll for status changes
     const interval = setInterval(async () => {
       const { data: uploadData } = await supabase
         .from("audio_uploads")
@@ -55,7 +81,6 @@ const Transcript = () => {
         if (t) setTranscription(t);
         setUpload((prev: any) => (prev ? { ...prev, status: uploadData.status } : prev));
 
-        // Stop polling once we have english_text or upload failed
         if (uploadData.status === "failed" || t?.english_text) {
           clearInterval(interval);
         }
@@ -63,7 +88,7 @@ const Transcript = () => {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [uploadId]);
+  }, [uploadId, user]);
 
   const handleRetryTranslation = async () => {
     if (!transcription?.id) return;
@@ -75,7 +100,6 @@ const Transcript = () => {
       setTranslationFailed(true);
       toast.error("Translation failed. Please try again.");
     } else {
-      // Refetch
       const { data: t } = await supabase
         .from("transcriptions")
         .select("*")
@@ -120,6 +144,24 @@ const Transcript = () => {
     doc.text(lines, 20, 35);
     doc.save(`${userName}_${audioName}_${suffix}.pdf`);
   };
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <main className="container mx-auto max-w-6xl px-4 pb-12 pt-24 text-center">
+          <ShieldAlert className="mx-auto h-12 w-12 text-destructive" />
+          <h1 className="mt-4 font-display text-2xl font-bold">Access Denied</h1>
+          <p className="mt-2 text-muted-foreground">
+            You don't have permission to view this transcript.
+          </p>
+          <Button variant="outline" className="mt-6" onClick={() => navigate("/dashboard")}>
+            Back to Dashboard
+          </Button>
+        </main>
+      </div>
+    );
+  }
 
   const isProcessing = upload?.status === "processing";
   const isFailed = upload?.status === "failed";
@@ -180,7 +222,7 @@ const Transcript = () => {
             ) : (
               <div className="grid gap-6 md:grid-cols-2">
                 {/* Somali Panel */}
-                <TranscriptPanel
+                <TranscriptPanelInline
                   title="Somali Transcript"
                   content={somaliText || "No transcript available yet."}
                   hasContent={!!somaliText}
@@ -191,7 +233,7 @@ const Transcript = () => {
                 />
 
                 {/* English Panel */}
-                <TranscriptPanel
+                <TranscriptPanelInline
                   title="English Translation"
                   content={hasEnglish ? englishText : translationFailed ? "" : "Translating…"}
                   hasContent={hasEnglish}
@@ -212,7 +254,7 @@ const Transcript = () => {
   );
 };
 
-interface TranscriptPanelProps {
+interface TranscriptPanelInlineProps {
   title: string;
   content: string;
   hasContent: boolean;
@@ -225,7 +267,7 @@ interface TranscriptPanelProps {
   onDownloadPdf?: () => void;
 }
 
-const TranscriptPanel = ({
+const TranscriptPanelInline = ({
   title,
   content,
   hasContent,
@@ -236,7 +278,7 @@ const TranscriptPanel = ({
   onCopy,
   onDownloadTxt,
   onDownloadPdf,
-}: TranscriptPanelProps) => (
+}: TranscriptPanelInlineProps) => (
   <div className="flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden">
     <div className="flex items-center justify-between border-b border-border px-5 py-3">
       <h3 className="font-display text-sm font-semibold">{title}</h3>

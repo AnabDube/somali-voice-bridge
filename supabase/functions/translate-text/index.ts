@@ -87,6 +87,8 @@ serve(async (req) => {
       );
     }
 
+    const startTime = Date.now();
+
     // Call Lovable AI for translation
     const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -109,6 +111,8 @@ serve(async (req) => {
         ],
       }),
     });
+
+    const processingTimeMs = Date.now() - startTime;
 
     if (!aiResp.ok) {
       const errText = await aiResp.text();
@@ -135,7 +139,6 @@ serve(async (req) => {
 
     const aiResult = await aiResp.json();
     const englishText = aiResult.choices?.[0]?.message?.content?.trim() || "";
-    const tokensUsed = aiResult.usage?.total_tokens || null;
 
     if (!englishText) {
       return new Response(JSON.stringify({ error: "Empty translation returned" }), {
@@ -144,12 +147,12 @@ serve(async (req) => {
       });
     }
 
-    // Save translation
+    // Save translation with actual processing time
     const { error: updateErr } = await adminClient
       .from("transcriptions")
       .update({
         english_text: englishText,
-        processing_time_ms: tokensUsed, // store token count in processing_time_ms for tracking
+        processing_time_ms: processingTimeMs,
       })
       .eq("id", transcription_id);
 
@@ -162,7 +165,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, text: englishText }),
+      JSON.stringify({ success: true, text: englishText, processing_time_ms: processingTimeMs }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e) {
