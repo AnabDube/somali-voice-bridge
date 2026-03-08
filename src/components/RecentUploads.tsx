@@ -41,6 +41,7 @@ const formatFileSize = (bytes: number | null) => {
 };
 
 const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
+  const navigate = useNavigate();
   if (uploads.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center shadow-card">
