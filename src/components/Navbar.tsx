@@ -1,11 +1,21 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Mic, Menu, X } from "lucide-react";
+import { Mic, Menu, X, LogOut } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/hooks/useProfile";
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user, signOut } = useAuth();
+  const { profile } = useProfile();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -19,7 +29,6 @@ const Navbar = () => {
           </span>
         </Link>
 
-        {/* Desktop nav */}
         <div className="hidden items-center gap-6 md:flex">
           <Link to="/dashboard" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
             Dashboard
@@ -27,18 +36,25 @@ const Navbar = () => {
           <Link to="/pricing" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
             Pricing
           </Link>
-          <Link to="/about" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-            About
-          </Link>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/login">Sign In</Link>
-          </Button>
-          <Button size="sm" className="bg-gradient-gold text-primary-foreground hover:opacity-90" asChild>
-            <Link to="/dashboard">Get Started</Link>
-          </Button>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">{profile?.display_name || user.email}</span>
+              <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign out">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/login">Sign In</Link>
+              </Button>
+              <Button size="sm" className="bg-gradient-gold text-primary-foreground hover:opacity-90" asChild>
+                <Link to="/signup">Get Started</Link>
+              </Button>
+            </>
+          )}
         </div>
 
-        {/* Mobile toggle */}
         <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
@@ -55,13 +71,20 @@ const Navbar = () => {
             <div className="flex flex-col gap-3 p-4">
               <Link to="/dashboard" className="text-sm font-medium" onClick={() => setMobileOpen(false)}>Dashboard</Link>
               <Link to="/pricing" className="text-sm font-medium" onClick={() => setMobileOpen(false)}>Pricing</Link>
-              <Link to="/about" className="text-sm font-medium" onClick={() => setMobileOpen(false)}>About</Link>
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/login">Sign In</Link>
-              </Button>
-              <Button size="sm" className="bg-gradient-gold text-primary-foreground" asChild>
-                <Link to="/dashboard">Get Started</Link>
-              </Button>
+              {user ? (
+                <Button variant="outline" size="sm" onClick={() => { handleSignOut(); setMobileOpen(false); }}>
+                  Sign Out
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to="/login" onClick={() => setMobileOpen(false)}>Sign In</Link>
+                  </Button>
+                  <Button size="sm" className="bg-gradient-gold text-primary-foreground" asChild>
+                    <Link to="/signup" onClick={() => setMobileOpen(false)}>Get Started</Link>
+                  </Button>
+                </>
+              )}
             </div>
           </motion.div>
         )}
