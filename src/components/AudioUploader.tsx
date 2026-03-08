@@ -14,7 +14,7 @@ interface AudioUploaderProps {
   disabled?: boolean;
 }
 
-const AudioUploader = ({ onFileSelected, isUploading }: AudioUploaderProps) => {
+const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
