@@ -4,9 +4,18 @@ import Navbar from "@/components/Navbar";
 import AudioUploader from "@/components/AudioUploader";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import StatsCard from "@/components/StatsCard";
+import { useProfile } from "@/hooks/useProfile";
 import { toast } from "sonner";
 
+const planLabels: Record<string, string> = {
+  free: "Free",
+  starter: "Starter",
+  professional: "Pro",
+  business: "Business",
+};
+
 const Dashboard = () => {
+  const { profile, loading: profileLoading } = useProfile();
   const [somaliText, setSomaliText] = useState("");
   const [englishText, setEnglishText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -36,16 +45,27 @@ const Dashboard = () => {
     }, 2000);
   };
 
+  const minutesUsed = profile?.minutes_used ?? 0;
+  const minutesLimit = profile?.minutes_limit ?? 30;
+  const plan = profile?.subscription_plan ?? "free";
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
       <main className="container mx-auto px-4 pb-12 pt-24">
+        {/* Welcome */}
+        {profile && (
+          <h2 className="mb-6 font-display text-2xl font-bold">
+            Welcome, {profile.display_name || "there"} 👋
+          </h2>
+        )}
+
         {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatsCard icon={Clock} label="Minutes Used" value="12.4" subtext="of 30 free min" />
-          <StatsCard icon={FileAudio} label="Files Processed" value="8" />
-          <StatsCard icon={Languages} label="Words Translated" value="1,247" />
-          <StatsCard icon={Zap} label="Plan" value="Free" subtext="Upgrade for more" />
+          <StatsCard icon={Clock} label="Minutes Used" value={`${minutesUsed}`} subtext={`of ${minutesLimit} min`} />
+          <StatsCard icon={FileAudio} label="Files Processed" value="—" />
+          <StatsCard icon={Languages} label="Words Translated" value="—" />
+          <StatsCard icon={Zap} label="Plan" value={planLabels[plan] || "Free"} subtext="Upgrade for more" />
         </div>
 
         {/* Upload */}
