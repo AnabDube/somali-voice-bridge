@@ -45,11 +45,11 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
   }, [onFileSelected, disabled]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
     const file = e.target.files?.[0];
     if (file && validateFile(file)) {
       onFileSelected(file);
     }
-    // Reset so same file can be re-selected
     e.target.value = "";
   };
 

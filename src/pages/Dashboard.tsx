@@ -198,10 +198,10 @@ const Dashboard = () => {
           </div>
         )}
         {isLowCredits && (
-          <div className="mb-6 flex items-center gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4">
-            <AlertTriangle className="h-5 w-5 shrink-0 text-yellow-600" />
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 p-4">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-accent-foreground" />
             <div>
-              <p className="text-sm font-semibold text-yellow-700 dark:text-yellow-400">Low credits</p>
+              <p className="text-sm font-semibold text-accent-foreground">Low credits</p>
               <p className="text-xs text-muted-foreground">
                 You have only {minutesRemaining} minute{minutesRemaining !== 1 ? "s" : ""} remaining. Consider upgrading your plan.
               </p>
