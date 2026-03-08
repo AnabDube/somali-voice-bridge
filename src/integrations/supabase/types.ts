@@ -14,16 +14,169 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      audio_uploads: {
+        Row: {
+          approved_for_training: boolean
+          created_at: string
+          dialect: Database["public"]["Enums"]["somali_dialect"] | null
+          duration_seconds: number | null
+          file_name: string
+          file_path: string
+          file_size_bytes: number | null
+          id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          approved_for_training?: boolean
+          created_at?: string
+          dialect?: Database["public"]["Enums"]["somali_dialect"] | null
+          duration_seconds?: number | null
+          file_name: string
+          file_path: string
+          file_size_bytes?: number | null
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          approved_for_training?: boolean
+          created_at?: string
+          dialect?: Database["public"]["Enums"]["somali_dialect"] | null
+          duration_seconds?: number | null
+          file_name?: string
+          file_path?: string
+          file_size_bytes?: number | null
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          minutes_limit: number
+          minutes_used: number
+          organization: string | null
+          subscription_plan: Database["public"]["Enums"]["subscription_plan"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          minutes_limit?: number
+          minutes_used?: number
+          organization?: string | null
+          subscription_plan?: Database["public"]["Enums"]["subscription_plan"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          minutes_limit?: number
+          minutes_used?: number
+          organization?: string | null
+          subscription_plan?: Database["public"]["Enums"]["subscription_plan"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      transcriptions: {
+        Row: {
+          confidence_score: number | null
+          created_at: string
+          english_text: string | null
+          id: string
+          processing_time_ms: number | null
+          somali_text: string | null
+          speaker_timestamps: Json | null
+          updated_at: string
+          upload_id: string
+          user_id: string
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string
+          english_text?: string | null
+          id?: string
+          processing_time_ms?: number | null
+          somali_text?: string | null
+          speaker_timestamps?: Json | null
+          updated_at?: string
+          upload_id: string
+          user_id: string
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string
+          english_text?: string | null
+          id?: string
+          processing_time_ms?: number | null
+          somali_text?: string | null
+          speaker_timestamps?: Json | null
+          updated_at?: string
+          upload_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transcriptions_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "audio_uploads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "moderator" | "user"
+      somali_dialect: "standard" | "af_maay" | "northern" | "benaadir" | "other"
+      subscription_plan: "free" | "starter" | "professional" | "business"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +303,10 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "moderator", "user"],
+      somali_dialect: ["standard", "af_maay", "northern", "benaadir", "other"],
+      subscription_plan: ["free", "starter", "professional", "business"],
+    },
   },
 } as const
