@@ -54,7 +54,6 @@ const Dashboard = () => {
     if (!user) return;
 
     setIsUploading(true);
-    const fileExt = file.name.split(".").pop() || "webm";
     const filePath = `${user.id}/${Date.now()}-${file.name}`;
 
     try {
@@ -66,7 +65,7 @@ const Dashboard = () => {
       if (storageError) throw storageError;
 
       // 2. Create database record
-      const { error: dbError } = await supabase
+      const { data: insertData, error: dbError } = await supabase
         .from("audio_uploads")
         .insert({
           user_id: user.id,
@@ -74,12 +73,37 @@ const Dashboard = () => {
           file_path: filePath,
           file_size_bytes: file.size,
           status: "uploaded",
-        });
+        })
+        .select("id")
+        .single();
 
       if (dbError) throw dbError;
 
-      toast.success(`"${file.name}" uploaded successfully!`);
+      toast.success(`"${file.name}" uploaded — transcription starting…`);
       await fetchUploads();
+
+      // 3. Trigger transcription
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      if (accessToken && insertData?.id) {
+        // Update status locally
+        setUploads((prev) =>
+          prev.map((u) => (u.id === insertData.id ? { ...u, status: "processing" } : u))
+        );
+
+        supabase.functions
+          .invoke("transcribe-audio", {
+            body: { upload_id: insertData.id },
+          })
+          .then(({ error: fnErr }) => {
+            if (fnErr) {
+              console.error("Transcription function error:", fnErr);
+            }
+            // Refresh uploads to get latest status
+            fetchUploads();
+          });
+      }
     } catch (err: any) {
       console.error("Upload error:", err);
       toast.error(err.message || "Upload failed. Please try again.");
