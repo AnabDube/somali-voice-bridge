@@ -12,9 +12,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
-  if (!ELEVENLABS_API_KEY) {
-    return new Response(JSON.stringify({ error: "ELEVENLABS_API_KEY not configured" }), {
+  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+  if (!OPENAI_API_KEY) {
+    return new Response(JSON.stringify({ error: "OPENAI_API_KEY not configured" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -33,7 +33,8 @@ serve(async (req) => {
       });
     }
 
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+    const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
 
@@ -56,6 +57,31 @@ serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Check user's credit/minutes balance
+    const { data: profile, error: profileErr } = await adminClient
+      .from("profiles")
+      .select("minutes_used, minutes_limit")
+      .eq("user_id", userId)
+      .single();
+
+    if (profileErr || !profile) {
+      return new Response(JSON.stringify({ error: "Profile not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const minutesRemaining = (profile.minutes_limit || 0) - (profile.minutes_used || 0);
+    if (minutesRemaining <= 0) {
+      return new Response(
+        JSON.stringify({
+          error: "no_credits",
+          message: "Transcription cannot proceed. No free credits available. Please add credits to continue.",
+        }),
+        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Verify the upload belongs to user
     const { data: upload, error: fetchErr } = await adminClient
@@ -91,42 +117,50 @@ serve(async (req) => {
       });
     }
 
-    // Send to ElevenLabs Speech-to-Text API
+    // Send to Whisper API
     const fileName = upload.file_name || "audio.wav";
     const formData = new FormData();
     formData.append("file", new File([fileData], fileName, { type: fileData.type }));
-    formData.append("model_id", "scribe_v2");
-    formData.append("language_code", "som"); // Somali ISO 639-3
-    formData.append("tag_audio_events", "false");
-    formData.append("diarize", "false");
+    formData.append("model", "whisper-1");
+    formData.append("language", "so"); // Somali
+    formData.append("response_format", "verbose_json");
 
-    const sttResp = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+    const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY,
-      },
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
       body: formData,
     });
 
-    if (!sttResp.ok) {
-      const errText = await sttResp.text();
-      console.error("ElevenLabs STT error:", sttResp.status, errText);
+    if (!whisperResp.ok) {
+      const errBody = await whisperResp.text();
+      console.error("Whisper API error:", whisperResp.status, errBody);
       await adminClient.from("audio_uploads").update({ status: "failed" }).eq("id", upload_id);
-      return new Response(JSON.stringify({ error: `ElevenLabs STT error: ${sttResp.status}` }), {
+
+      // Handle quota/billing errors specifically
+      if (whisperResp.status === 429 || whisperResp.status === 402) {
+        let parsed: any = {};
+        try { parsed = JSON.parse(errBody); } catch {}
+        const isQuota = parsed?.error?.code === "insufficient_quota" || parsed?.error?.type === "insufficient_quota";
+        return new Response(
+          JSON.stringify({
+            error: isQuota ? "no_credits" : "rate_limited",
+            message: isQuota
+              ? "Transcription cannot proceed. No free credits available on the OpenAI account. Please add credits to continue."
+              : "Too many requests. Please wait a moment and try again.",
+          }),
+          { status: whisperResp.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ error: `Whisper API error: ${whisperResp.status}` }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const sttResult = await sttResp.json();
-    const somaliText = sttResult.text || "";
-
-    // Calculate duration from word timestamps if available
-    let duration = null;
-    if (sttResult.words && sttResult.words.length > 0) {
-      const lastWord = sttResult.words[sttResult.words.length - 1];
-      duration = lastWord.end || null;
-    }
+    const whisperResult = await whisperResp.json();
+    const somaliText = whisperResult.text || "";
+    const duration = whisperResult.duration || null;
 
     // Save transcription
     const { error: insertErr } = await adminClient.from("transcriptions").insert({
@@ -145,16 +179,23 @@ serve(async (req) => {
       });
     }
 
-    // Update upload status to completed + duration
+    // Update upload status + duration
     await adminClient
       .from("audio_uploads")
       .update({ status: "completed", duration_seconds: duration })
       .eq("id", upload_id);
 
-    return new Response(JSON.stringify({ success: true, text: somaliText }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // Update user's minutes_used
+    const durationMinutes = duration ? Math.ceil(duration / 60) : 1;
+    await adminClient
+      .from("profiles")
+      .update({ minutes_used: (profile.minutes_used || 0) + durationMinutes })
+      .eq("user_id", userId);
+
+    return new Response(
+      JSON.stringify({ success: true, text: somaliText, minutes_used: durationMinutes }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (e) {
     console.error("transcribe-audio error:", e);
     return new Response(
