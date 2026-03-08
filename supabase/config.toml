@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.translate-text]
 verify_jwt = false
+
+[functions.reset-usage]
+verify_jwt = false

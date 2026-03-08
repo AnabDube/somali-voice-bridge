@@ -17,6 +17,12 @@ const Navbar = () => {
     navigate("/");
   };
 
+  const navLinks = [
+    { to: "/dashboard", label: "Dashboard" },
+    { to: "/history", label: "History" },
+    { to: "/pricing", label: "Pricing" },
+  ];
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
@@ -30,12 +36,15 @@ const Navbar = () => {
         </Link>
 
         <div className="hidden items-center gap-6 md:flex">
-          <Link to="/dashboard" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-            Dashboard
-          </Link>
-          <Link to="/pricing" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
-            Pricing
-          </Link>
+          {navLinks.map((link) => (
+            <Link
+              key={link.to}
+              to={link.to}
+              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {link.label}
+            </Link>
+          ))}
           {user ? (
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">{profile?.display_name || user.email}</span>
@@ -69,8 +78,11 @@ const Navbar = () => {
             className="overflow-hidden border-t border-border bg-background md:hidden"
           >
             <div className="flex flex-col gap-3 p-4">
-              <Link to="/dashboard" className="text-sm font-medium" onClick={() => setMobileOpen(false)}>Dashboard</Link>
-              <Link to="/pricing" className="text-sm font-medium" onClick={() => setMobileOpen(false)}>Pricing</Link>
+              {navLinks.map((link) => (
+                <Link key={link.to} to={link.to} className="text-sm font-medium" onClick={() => setMobileOpen(false)}>
+                  {link.label}
+                </Link>
+              ))}
               {user ? (
                 <Button variant="outline" size="sm" onClick={() => { handleSignOut(); setMobileOpen(false); }}>
                   Sign Out

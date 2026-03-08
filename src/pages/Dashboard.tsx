@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Clock, FileAudio, Languages, Zap, AlertTriangle } from "lucide-react";
+import { Clock, FileAudio, Languages, Zap, AlertTriangle, History } from "lucide-react";
+import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import AudioUploader from "@/components/AudioUploader";
 import RecentUploads from "@/components/RecentUploads";
 import StatsCard from "@/components/StatsCard";
 import UsageBar from "@/components/UsageBar";
+import { Button } from "@/components/ui/button";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -71,12 +73,39 @@ const Dashboard = () => {
   const hasCredits = minutesRemaining > 0;
   const isLowCredits = minutesRemaining > 0 && minutesRemaining <= 5;
 
+  const getAudioDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const audio = new Audio();
+      audio.addEventListener("loadedmetadata", () => {
+        resolve(audio.duration);
+        URL.revokeObjectURL(audio.src);
+      });
+      audio.addEventListener("error", () => {
+        resolve(0); // Can't determine duration, let backend enforce
+        URL.revokeObjectURL(audio.src);
+      });
+      audio.src = URL.createObjectURL(file);
+    });
+  };
+
   const handleFileSelected = async (file: File) => {
     if (!user) return;
 
     if (!hasCredits) {
-      toast.error("Transcription cannot proceed. No free credits available. Please add credits to continue.");
+      toast.error("No credits remaining. Please upgrade your plan to continue.");
       return;
+    }
+
+    // Pre-check: estimate file duration against remaining minutes
+    const durationSec = await getAudioDuration(file);
+    if (durationSec > 0) {
+      const durationMin = Math.ceil(durationSec / 60);
+      if (durationMin > minutesRemaining) {
+        toast.error(
+          `This file is ~${durationMin} min but you only have ${minutesRemaining} min remaining. Please upgrade your plan.`
+        );
+        return;
+      }
     }
 
     setIsUploading(true);
@@ -114,40 +143,46 @@ const Dashboard = () => {
           prev.map((u) => (u.id === insertData.id ? { ...u, status: "processing" } : u))
         );
 
-        supabase.functions
+        const { data: fnData, error: fnErr } = await supabase.functions
           .invoke("transcribe-audio", {
             body: { upload_id: insertData.id },
-          })
-          .then(async ({ data: fnData, error: fnErr }) => {
-            if (fnErr) {
-              console.error("Transcription function error:", fnErr);
-              try {
-                const parsed = typeof fnErr === "object" ? fnErr : JSON.parse(String(fnErr));
-                if (parsed?.context?.body) {
-                  const body = JSON.parse(parsed.context.body);
-                  if (body.error === "no_credits") {
-                    toast.error(body.message);
-                  }
-                }
-              } catch {}
-            }
-
-            // Chain translation if transcription succeeded
-            if (fnData?.transcription_id) {
-              supabase.functions
-                .invoke("translate-text", {
-                  body: { transcription_id: fnData.transcription_id },
-                })
-                .then(({ error: tlErr }) => {
-                  if (tlErr) console.error("Translation error:", tlErr);
-                  fetchUploads();
-                  refetchProfile?.();
-                });
-            }
-
-            fetchUploads();
-            refetchProfile?.();
           });
+
+        if (fnErr) {
+          console.error("Transcription function error:", fnErr);
+          let errorMessage = "Transcription failed. Please try again.";
+          try {
+            const parsed = typeof fnErr === "object" ? fnErr : JSON.parse(String(fnErr));
+            if (parsed?.context?.body) {
+              const body = JSON.parse(parsed.context.body);
+              if (body.error === "no_credits") {
+                errorMessage = body.message;
+              } else if (body.message) {
+                errorMessage = body.message;
+              }
+            }
+          } catch {}
+          toast.error(errorMessage);
+          fetchUploads();
+          refetchProfile?.();
+          return;
+        }
+
+        // Chain translation if transcription succeeded
+        if (fnData?.transcription_id) {
+          const { error: tlErr } = await supabase.functions
+            .invoke("translate-text", {
+              body: { transcription_id: fnData.transcription_id },
+            });
+
+          if (tlErr) {
+            console.error("Translation error:", tlErr);
+            toast.error("Translation failed. You can retry from the transcript page.");
+          }
+        }
+
+        fetchUploads();
+        refetchProfile?.();
       }
     } catch (err: any) {
       console.error("Upload error:", err);
@@ -163,6 +198,7 @@ const Dashboard = () => {
 
     try {
       await supabase.storage.from("audio-uploads").remove([upload.file_path]);
+      // Cascade delete will remove associated transcriptions
       const { error } = await supabase.from("audio_uploads").delete().eq("id", id);
       if (error) throw error;
 
@@ -236,6 +272,12 @@ const Dashboard = () => {
         </div>
 
         {/* Recent Uploads */}
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-display text-sm font-semibold">Recent Uploads</h3>
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" asChild>
+            <Link to="/history"><History className="h-3.5 w-3.5" /> View All</Link>
+          </Button>
+        </div>
         <RecentUploads uploads={uploads} onDelete={handleDelete} />
       </main>
     </div>
