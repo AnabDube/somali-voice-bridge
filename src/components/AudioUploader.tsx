@@ -11,6 +11,7 @@ const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
 interface AudioUploaderProps {
   onFileSelected: (file: File) => void;
   isUploading?: boolean;
+  disabled?: boolean;
 }
 
 const AudioUploader = ({ onFileSelected, isUploading }: AudioUploaderProps) => {
