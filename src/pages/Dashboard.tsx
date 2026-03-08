@@ -4,6 +4,7 @@ import Navbar from "@/components/Navbar";
 import AudioUploader from "@/components/AudioUploader";
 import RecentUploads from "@/components/RecentUploads";
 import StatsCard from "@/components/StatsCard";
+import UsageBar from "@/components/UsageBar";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
