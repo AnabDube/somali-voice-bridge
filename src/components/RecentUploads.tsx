@@ -22,7 +22,7 @@ interface RecentUploadsProps {
 const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
   uploaded: { label: "Uploaded", variant: "outline" },
   processing: { label: "Processing", variant: "secondary" },
-  completed: { label: "Completed", variant: "default" },
+  completed: { label: "Ready", variant: "default" },
   failed: { label: "Failed", variant: "destructive" },
   pending: { label: "Uploaded", variant: "outline" },
 };
@@ -84,6 +84,15 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
               <Badge variant={cfg.variant} className="shrink-0">{cfg.label}</Badge>
               {upload.status === "processing" ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+              ) : upload.status === "completed" ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 gap-1.5 text-xs"
+                  onClick={() => navigate(`/transcript/${upload.id}`)}
+                >
+                  <Eye className="h-3.5 w-3.5" /> View Transcript
+                </Button>
               ) : (
                 <Button
                   variant="ghost"

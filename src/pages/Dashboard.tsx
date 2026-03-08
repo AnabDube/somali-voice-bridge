@@ -117,10 +117,9 @@ const Dashboard = () => {
           .invoke("transcribe-audio", {
             body: { upload_id: insertData.id },
           })
-          .then(({ data: fnData, error: fnErr }) => {
+          .then(async ({ data: fnData, error: fnErr }) => {
             if (fnErr) {
               console.error("Transcription function error:", fnErr);
-              // Check if it's a credits issue
               try {
                 const parsed = typeof fnErr === "object" ? fnErr : JSON.parse(String(fnErr));
                 if (parsed?.context?.body) {
@@ -129,10 +128,22 @@ const Dashboard = () => {
                     toast.error(body.message);
                   }
                 }
-              } catch {
-                // generic error
-              }
+              } catch {}
             }
+
+            // Chain translation if transcription succeeded
+            if (fnData?.transcription_id) {
+              supabase.functions
+                .invoke("translate-text", {
+                  body: { transcription_id: fnData.transcription_id },
+                })
+                .then(({ error: tlErr }) => {
+                  if (tlErr) console.error("Translation error:", tlErr);
+                  fetchUploads();
+                  refetchProfile?.();
+                });
+            }
+
             fetchUploads();
             refetchProfile?.();
           });

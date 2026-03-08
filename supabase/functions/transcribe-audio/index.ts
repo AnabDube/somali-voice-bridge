@@ -163,12 +163,12 @@ serve(async (req) => {
     const duration = whisperResult.duration || null;
 
     // Save transcription
-    const { error: insertErr } = await adminClient.from("transcriptions").insert({
+    const { data: transcriptionRow, error: insertErr } = await adminClient.from("transcriptions").insert({
       upload_id,
       user_id: userId,
       somali_text: somaliText,
       confidence_score: null,
-    });
+    }).select("id").single();
 
     if (insertErr) {
       console.error("Insert transcription error:", insertErr);
@@ -193,7 +193,12 @@ serve(async (req) => {
       .eq("user_id", userId);
 
     return new Response(
-      JSON.stringify({ success: true, text: somaliText, minutes_used: durationMinutes }),
+      JSON.stringify({
+        success: true,
+        text: somaliText,
+        minutes_used: durationMinutes,
+        transcription_id: transcriptionRow?.id,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e) {
