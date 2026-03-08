@@ -1,14 +1,19 @@
 import { useCallback, useState, useRef } from "react";
-import { Upload, Mic, Square, FileAudio } from "lucide-react";
+import { Upload, Mic, Square, FileAudio, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const ACCEPTED_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/webm"];
+const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
+
 interface AudioUploaderProps {
   onFileSelected: (file: File) => void;
+  isUploading?: boolean;
 }
 
-const AudioUploader = ({ onFileSelected }: AudioUploaderProps) => {
+const AudioUploader = ({ onFileSelected, isUploading }: AudioUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -16,20 +21,34 @@ const AudioUploader = ({ onFileSelected }: AudioUploaderProps) => {
   const chunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
 
+  const validateFile = (file: File): boolean => {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error("File too large. Maximum size is 50MB.");
+      return false;
+    }
+    if (!ACCEPTED_TYPES.includes(file.type) && !file.name.match(ACCEPTED_EXTENSIONS)) {
+      toast.error("Unsupported format. Please upload MP3, WAV, or M4A.");
+      return false;
+    }
+    return true;
+  };
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && (file.type.includes("audio") || file.name.match(/\.(mp3|wav|m4a|ogg|webm)$/i))) {
+    if (file && validateFile(file)) {
       onFileSelected(file);
-    } else {
-      toast.error("Please upload an audio file (MP3, WAV, M4A)");
     }
   }, [onFileSelected]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) onFileSelected(file);
+    if (file && validateFile(file)) {
+      onFileSelected(file);
+    }
+    // Reset so same file can be re-selected
+    e.target.value = "";
   };
 
   const startRecording = async () => {
@@ -55,7 +74,7 @@ const AudioUploader = ({ onFileSelected }: AudioUploaderProps) => {
       setRecordingTime(0);
       intervalRef.current = setInterval(() => setRecordingTime((t) => t + 1), 1000);
     } catch {
-      toast.error("Microphone access denied");
+      toast.error("Microphone access denied. Please allow microphone access.");
     }
   };
 
@@ -65,7 +84,8 @@ const AudioUploader = ({ onFileSelected }: AudioUploaderProps) => {
     clearInterval(intervalRef.current);
   };
 
-  const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+  const formatTime = (s: number) =>
+    `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
   return (
     <div className="w-full">
@@ -78,7 +98,19 @@ const AudioUploader = ({ onFileSelected }: AudioUploaderProps) => {
         }`}
       >
         <AnimatePresence mode="wait">
-          {isRecording ? (
+          {isUploading ? (
+            <motion.div
+              key="uploading"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="flex flex-col items-center gap-4"
+            >
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="font-display text-lg font-semibold">Uploading audio...</p>
+              <p className="text-sm text-muted-foreground">Please wait while your file is being saved</p>
+            </motion.div>
+          ) : isRecording ? (
             <motion.div
               key="recording"
               initial={{ scale: 0.9, opacity: 0 }}
@@ -111,14 +143,14 @@ const AudioUploader = ({ onFileSelected }: AudioUploaderProps) => {
               <div className="text-center">
                 <p className="font-display text-lg font-semibold">Upload Somali Audio</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Drag & drop MP3, WAV, or M4A files here
+                  Drag & drop MP3, WAV, or M4A files here (max 50MB)
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <Button variant="outline" className="gap-2" asChild>
                   <label className="cursor-pointer">
                     <Upload className="h-4 w-4" /> Browse Files
-                    <input type="file" accept="audio/*" className="hidden" onChange={handleFileInput} />
+                    <input type="file" accept=".mp3,.wav,.m4a,.webm,audio/*" className="hidden" onChange={handleFileInput} />
                   </label>
                 </Button>
                 <Button onClick={startRecording} className="gap-2 bg-gradient-gold text-primary-foreground hover:opacity-90">
