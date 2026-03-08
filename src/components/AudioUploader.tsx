@@ -37,11 +37,12 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (disabled) return;
     const file = e.dataTransfer.files[0];
     if (file && validateFile(file)) {
       onFileSelected(file);
     }
-  }, [onFileSelected]);
+  }, [onFileSelected, disabled]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
