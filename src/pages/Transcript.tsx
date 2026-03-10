@@ -134,6 +134,33 @@ const Transcript = () => {
     }
   };
 
+  const handleEditSave = async () => {
+    if (!transcription?.id || !editedText.trim()) return;
+    setIsSaving(true);
+    const { error } = await supabase
+      .from("transcriptions")
+      .update({ somali_text: editedText.trim(), english_text: null })
+      .eq("id", transcription.id);
+    if (error) {
+      toast.error("Failed to save edit.");
+    } else {
+      setTranscription((prev: any) => ({ ...prev, somali_text: editedText.trim(), english_text: null }));
+      setIsEditing(false);
+      toast.success("Transcript updated. Re-translating…");
+      // Re-trigger translation
+      const { error: translateErr } = await supabase.functions.invoke("translate-text", {
+        body: { transcription_id: transcription.id },
+      });
+      if (translateErr) {
+        setTranslationFailed(true);
+      } else {
+        setTranslationFailed(false);
+        startPolling();
+      }
+    }
+    setIsSaving(false);
+  };
+
   const togglePlayback = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
