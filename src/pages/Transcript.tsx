@@ -3,8 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
   Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
+  Pencil, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,6 +28,9 @@ const Transcript = () => {
   const [translationFailed, setTranslationFailed] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedText, setEditedText] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -127,6 +132,33 @@ const Transcript = () => {
       // Start polling for the translation result
       startPolling();
     }
+  };
+
+  const handleEditSave = async () => {
+    if (!transcription?.id || !editedText.trim()) return;
+    setIsSaving(true);
+    const { error } = await supabase
+      .from("transcriptions")
+      .update({ somali_text: editedText.trim(), english_text: null })
+      .eq("id", transcription.id);
+    if (error) {
+      toast.error("Failed to save edit.");
+    } else {
+      setTranscription((prev: any) => ({ ...prev, somali_text: editedText.trim(), english_text: null }));
+      setIsEditing(false);
+      toast.success("Transcript updated. Re-translating…");
+      // Re-trigger translation
+      const { error: translateErr } = await supabase.functions.invoke("translate-text", {
+        body: { transcription_id: transcription.id },
+      });
+      if (translateErr) {
+        setTranslationFailed(true);
+      } else {
+        setTranslationFailed(false);
+        startPolling();
+      }
+    }
+    setIsSaving(false);
   };
 
   const togglePlayback = () => {
@@ -282,6 +314,13 @@ const Transcript = () => {
                   onCopy={() => somaliText && handleCopy(somaliText, "somali")}
                   onDownloadTxt={() => downloadTxt(somaliText, "transcript")}
                   onDownloadPdf={() => downloadPdf(somaliText, "Somali Transcript", "transcript")}
+                  isEditing={isEditing}
+                  editedText={editedText}
+                  onEditStart={() => { setEditedText(somaliText); setIsEditing(true); }}
+                  onEditChange={setEditedText}
+                  onEditSave={handleEditSave}
+                  onEditCancel={() => setIsEditing(false)}
+                  isSaving={isSaving}
                 />
 
                 {/* English Panel */}
@@ -317,6 +356,13 @@ interface TranscriptPanelInlineProps {
   onCopy: () => void;
   onDownloadTxt?: () => void;
   onDownloadPdf?: () => void;
+  isEditing?: boolean;
+  editedText?: string;
+  onEditStart?: () => void;
+  onEditChange?: (text: string) => void;
+  onEditSave?: () => void;
+  onEditCancel?: () => void;
+  isSaving?: boolean;
 }
 
 const TranscriptPanelInline = ({
@@ -330,12 +376,35 @@ const TranscriptPanelInline = ({
   onCopy,
   onDownloadTxt,
   onDownloadPdf,
+  isEditing,
+  editedText,
+  onEditStart,
+  onEditChange,
+  onEditSave,
+  onEditCancel,
+  isSaving,
 }: TranscriptPanelInlineProps) => (
   <div className="flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden">
     <div className="flex items-center justify-between border-b border-border px-5 py-3">
       <h3 className="font-display text-sm font-semibold">{title}</h3>
       <div className="flex items-center gap-1">
-        {hasContent && (
+        {hasContent && !isEditing && onEditStart && (
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onEditStart}>
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </Button>
+        )}
+        {isEditing && (
+          <>
+            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onEditCancel} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button variant="default" size="sm" className="gap-1.5 text-xs" onClick={onEditSave} disabled={isSaving}>
+              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save & Re-translate
+            </Button>
+          </>
+        )}
+        {hasContent && !isEditing && (
           <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onCopy}>
             {copied ? (
               <><Check className="h-3.5 w-3.5" /> Copied</>
@@ -367,12 +436,25 @@ const TranscriptPanelInline = ({
             Translation will appear here shortly.
           </p>
         </div>
+      ) : isEditing ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Edit the transcript below if it's incorrect. Saving will re-translate.
+          </p>
+          <Textarea
+            value={editedText}
+            onChange={(e) => onEditChange?.(e.target.value)}
+            className="min-h-[200px] text-sm leading-relaxed"
+            disabled={isSaving}
+          />
+        </div>
       ) : (
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>
       )}
     </div>
 
-    {hasContent && (onDownloadTxt || onDownloadPdf) && (
+    {hasContent && !isEditing && (onDownloadTxt || onDownloadPdf) && (
       <div className="flex items-center gap-2 border-t border-border px-5 py-3">
         <Download className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs text-muted-foreground">Export:</span>
