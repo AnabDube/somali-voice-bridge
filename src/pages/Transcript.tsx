@@ -314,6 +314,13 @@ const Transcript = () => {
                   onCopy={() => somaliText && handleCopy(somaliText, "somali")}
                   onDownloadTxt={() => downloadTxt(somaliText, "transcript")}
                   onDownloadPdf={() => downloadPdf(somaliText, "Somali Transcript", "transcript")}
+                  isEditing={isEditing}
+                  editedText={editedText}
+                  onEditStart={() => { setEditedText(somaliText); setIsEditing(true); }}
+                  onEditChange={setEditedText}
+                  onEditSave={handleEditSave}
+                  onEditCancel={() => setIsEditing(false)}
+                  isSaving={isSaving}
                 />
 
                 {/* English Panel */}
