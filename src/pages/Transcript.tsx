@@ -3,8 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
   Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
+  Pencil, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
