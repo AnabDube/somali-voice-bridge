@@ -172,6 +172,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_minutes_used: {
+        Args: { p_minutes: number; p_user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
