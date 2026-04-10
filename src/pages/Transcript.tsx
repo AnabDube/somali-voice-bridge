@@ -3,16 +3,38 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
   Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
-  Pencil, Save,
+  Pencil, Save, Clock, List,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
+
+interface Segment {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+const DIALECT_LABELS: Record<string, string> = {
+  standard: "Standard",
+  af_maay: "Af-Maay",
+  northern: "Northern",
+  benaadir: "Benaadir",
+  other: "Other",
+};
+
+const formatTimestamp = (seconds: number): string => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
 
 const Transcript = () => {
   const { uploadId } = useParams<{ uploadId: string }>();
@@ -31,8 +53,11 @@ const Transcript = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [showSegments, setShowSegments] = useState(false);
+  const [activeSegment, setActiveSegment] = useState(-1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const rafRef = useRef<number>();
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -51,11 +76,8 @@ const Transcript = () => {
         .single();
       if (t) {
         setTranscription(t);
-        if (t.english_text) {
-          stopPolling();
-        }
+        if (t.english_text) stopPolling();
       }
-
       const { data: uploadData } = await supabase
         .from("audio_uploads")
         .select("status")
@@ -67,6 +89,42 @@ const Transcript = () => {
       }
     }, 3000);
   }, [uploadId, stopPolling]);
+
+  // Parse segments from transcription
+  const segments: Segment[] = (() => {
+    try {
+      const raw = transcription?.speaker_timestamps;
+      if (!raw || !Array.isArray(raw)) return [];
+      return raw.filter((s: any) => typeof s.start === "number" && typeof s.end === "number" && s.text);
+    } catch {
+      return [];
+    }
+  })();
+
+  // RAF loop to track active segment
+  useEffect(() => {
+    const tick = () => {
+      if (audioRef.current && !audioRef.current.paused && segments.length > 0) {
+        const ct = audioRef.current.currentTime;
+        const idx = segments.findIndex((s) => ct >= s.start && ct < s.end);
+        setActiveSegment(idx);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    if (isPlaying && segments.length > 0) {
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isPlaying, segments]);
+
+  const seekTo = (seconds: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = seconds;
+    audioRef.current.play();
+    setIsPlaying(true);
+  };
 
   useEffect(() => {
     if (!uploadId || !user) return;
@@ -84,16 +142,13 @@ const Transcript = () => {
         setLoading(false);
         return;
       }
-
       if (uploadData.user_id !== user.id) {
         setAccessDenied(true);
         setLoading(false);
         return;
       }
-
       setUpload(uploadData);
 
-      // Get signed URL for audio playback
       const { data: signedData } = await supabase.storage
         .from("audio-uploads")
         .createSignedUrl(uploadData.file_path, 3600);
@@ -104,18 +159,14 @@ const Transcript = () => {
         .select("*")
         .eq("upload_id", uploadId)
         .single();
-
       if (t) setTranscription(t);
       setLoading(false);
 
-      // Start polling if still processing or awaiting translation
       if (uploadData.status === "processing" || (t?.somali_text && !t?.english_text)) {
         startPolling();
       }
     };
-
     fetchData();
-
     return () => stopPolling();
   }, [uploadId, user, startPolling, stopPolling]);
 
@@ -129,7 +180,6 @@ const Transcript = () => {
       setTranslationFailed(true);
       toast.error("Translation failed. Please try again.");
     } else {
-      // Start polling for the translation result
       startPolling();
     }
   };
@@ -147,7 +197,6 @@ const Transcript = () => {
       setTranscription((prev: any) => ({ ...prev, somali_text: editedText.trim(), english_text: null }));
       setIsEditing(false);
       toast.success("Transcript updated. Re-translating…");
-      // Re-trigger translation
       const { error: translateErr } = await supabase.functions.invoke("translate-text", {
         body: { transcription_id: transcription.id },
       });
@@ -230,6 +279,7 @@ const Transcript = () => {
   const englishText = transcription?.english_text || "";
   const hasEnglish = !!englishText;
   const isTranslating = !!somaliText && !hasEnglish && !translationFailed;
+  const dialectLabel = upload?.dialect ? DIALECT_LABELS[upload.dialect] || upload.dialect : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -256,9 +306,16 @@ const Transcript = () => {
                 <FileAudio className="h-6 w-6 text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="font-display text-xl font-bold truncate">
-                  {upload?.file_name || "Audio File"}
-                </h1>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="font-display text-xl font-bold truncate">
+                    {upload?.file_name || "Audio File"}
+                  </h1>
+                  {dialectLabel && (
+                    <Badge variant="secondary" className="text-xs shrink-0">
+                      {dialectLabel}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground">Transcript & Translation</p>
               </div>
             </div>
@@ -321,6 +378,11 @@ const Transcript = () => {
                   onEditSave={handleEditSave}
                   onEditCancel={() => setIsEditing(false)}
                   isSaving={isSaving}
+                  segments={segments}
+                  showSegments={showSegments}
+                  onToggleSegments={() => setShowSegments(!showSegments)}
+                  activeSegment={activeSegment}
+                  onSeekTo={seekTo}
                 />
 
                 {/* English Panel */}
@@ -363,6 +425,11 @@ interface TranscriptPanelInlineProps {
   onEditSave?: () => void;
   onEditCancel?: () => void;
   isSaving?: boolean;
+  segments?: Segment[];
+  showSegments?: boolean;
+  onToggleSegments?: () => void;
+  activeSegment?: number;
+  onSeekTo?: (seconds: number) => void;
 }
 
 const TranscriptPanelInline = ({
@@ -383,11 +450,25 @@ const TranscriptPanelInline = ({
   onEditSave,
   onEditCancel,
   isSaving,
+  segments = [],
+  showSegments,
+  onToggleSegments,
+  activeSegment = -1,
+  onSeekTo,
 }: TranscriptPanelInlineProps) => (
   <div className="flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden">
     <div className="flex items-center justify-between border-b border-border px-5 py-3">
       <h3 className="font-display text-sm font-semibold">{title}</h3>
       <div className="flex items-center gap-1">
+        {segments.length > 0 && !isEditing && onToggleSegments && (
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleSegments}>
+            {showSegments ? (
+              <><FileText className="h-3.5 w-3.5" /> Plain</>
+            ) : (
+              <><Clock className="h-3.5 w-3.5" /> Timestamps</>
+            )}
+          </Button>
+        )}
         {hasContent && !isEditing && onEditStart && (
           <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onEditStart}>
             <Pencil className="h-3.5 w-3.5" /> Edit
@@ -448,6 +529,25 @@ const TranscriptPanelInline = ({
             className="min-h-[200px] text-sm leading-relaxed"
             disabled={isSaving}
           />
+        </div>
+      ) : showSegments && segments.length > 0 ? (
+        <div className="space-y-1">
+          {segments.map((seg, i) => (
+            <div
+              key={seg.id ?? i}
+              className={`flex items-start gap-3 rounded-lg px-3 py-2 transition-colors ${
+                i === activeSegment ? "bg-primary/10" : "hover:bg-muted/50"
+              }`}
+            >
+              <button
+                onClick={() => onSeekTo?.(seg.start)}
+                className="mt-0.5 shrink-0 rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+              >
+                {formatTimestamp(seg.start)}
+              </button>
+              <span className="text-sm leading-relaxed">{seg.text}</span>
+            </div>
+          ))}
         </div>
       ) : (
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>

@@ -136,7 +136,6 @@ serve(async (req) => {
       console.error("Whisper API error:", whisperResp.status, errBody);
       await adminClient.from("audio_uploads").update({ status: "failed" }).eq("id", upload_id);
 
-      // Handle quota/billing errors specifically
       if (whisperResp.status === 429 || whisperResp.status === 402) {
         let parsed: any = {};
         try { parsed = JSON.parse(errBody); } catch {}
@@ -162,12 +161,21 @@ serve(async (req) => {
     const somaliText = whisperResult.text || "";
     const duration = whisperResult.duration || null;
 
+    // Extract segment timestamps
+    const segments = (whisperResult.segments || []).map((s: any) => ({
+      id: s.id,
+      start: Math.round(s.start * 10) / 10,
+      end: Math.round(s.end * 10) / 10,
+      text: (s.text || "").trim(),
+    }));
+
     // Save transcription
     const { data: transcriptionRow, error: insertErr } = await adminClient.from("transcriptions").insert({
       upload_id,
       user_id: userId,
       somali_text: somaliText,
       confidence_score: null,
+      speaker_timestamps: segments.length > 0 ? segments : null,
     }).select("id").single();
 
     if (insertErr) {
@@ -185,12 +193,12 @@ serve(async (req) => {
       .update({ status: "completed", duration_seconds: duration })
       .eq("id", upload_id);
 
-    // Update user's minutes_used
+    // Atomically update user's minutes_used via RPC
     const durationMinutes = duration ? Math.ceil(duration / 60) : 1;
-    await adminClient
-      .from("profiles")
-      .update({ minutes_used: (profile.minutes_used || 0) + durationMinutes })
-      .eq("user_id", userId);
+    await adminClient.rpc("increment_minutes_used", {
+      p_user_id: userId,
+      p_minutes: durationMinutes,
+    });
 
     return new Response(
       JSON.stringify({

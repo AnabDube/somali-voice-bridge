@@ -1,6 +1,7 @@
 import { useCallback, useState, useRef } from "react";
 import { Upload, Mic, Square, FileAudio, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
@@ -8,8 +9,18 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const ACCEPTED_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/webm"];
 const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
 
+export type SomaliDialect = "standard" | "af_maay" | "northern" | "benaadir" | "other";
+
+const DIALECT_OPTIONS: { value: SomaliDialect; label: string }[] = [
+  { value: "standard", label: "Standard Somali" },
+  { value: "northern", label: "Northern (Isaaq/Dir)" },
+  { value: "benaadir", label: "Benaadir" },
+  { value: "af_maay", label: "Af-Maay" },
+  { value: "other", label: "Other / Mixed" },
+];
+
 interface AudioUploaderProps {
-  onFileSelected: (file: File) => void;
+  onFileSelected: (file: File, dialect: SomaliDialect) => void;
   isUploading?: boolean;
   disabled?: boolean;
 }
@@ -18,6 +29,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [dialect, setDialect] = useState<SomaliDialect>("standard");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
@@ -40,15 +52,15 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
     if (disabled) return;
     const file = e.dataTransfer.files[0];
     if (file && validateFile(file)) {
-      onFileSelected(file);
+      onFileSelected(file, dialect);
     }
-  }, [onFileSelected, disabled]);
+  }, [onFileSelected, disabled, dialect]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
     const file = e.target.files?.[0];
     if (file && validateFile(file)) {
-      onFileSelected(file);
+      onFileSelected(file, dialect);
     }
     e.target.value = "";
   };
@@ -67,7 +79,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         const file = new File([blob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
-        onFileSelected(file);
+        onFileSelected(file, dialect);
         stream.getTracks().forEach((t) => t.stop());
       };
 
@@ -90,7 +102,24 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-3">
+      {/* Dialect Selector */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium text-muted-foreground">Dialect:</label>
+        <Select value={dialect} onValueChange={(v) => setDialect(v as SomaliDialect)}>
+          <SelectTrigger className="w-[220px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DIALECT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <motion.div
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
