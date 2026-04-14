@@ -11,26 +11,24 @@ serve(async (req) => {
   // --- OpenAI Whisper (commented out — switched to Groq) ---
   // const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-  // --- Groq Whisper (commented out — switched to Azure OpenAI) ---
-  // const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+  // --- Azure OpenAI Whisper (commented out — reverted to Groq because
+  //     Azure's Whisper deployment rejects language="so" as unsupported,
+  //     which caused mis-detection to Arabic for Somali audio) ---
+  // const AZURE_OPENAI_ENDPOINT = Deno.env.get("AZURE_OPENAI_ENDPOINT");
+  // const AZURE_OPENAI_API_KEY = Deno.env.get("AZURE_OPENAI_API_KEY");
+  // const AZURE_OPENAI_WHISPER_DEPLOYMENT =
+  //   Deno.env.get("AZURE_OPENAI_WHISPER_DEPLOYMENT") || "whisper";
+  // const AZURE_OPENAI_API_VERSION =
+  //   Deno.env.get("AZURE_OPENAI_API_VERSION") || "2024-06-01";
 
-  // Azure OpenAI Whisper
-  const AZURE_OPENAI_ENDPOINT = Deno.env.get("AZURE_OPENAI_ENDPOINT");
-  const AZURE_OPENAI_API_KEY = Deno.env.get("AZURE_OPENAI_API_KEY");
-  const AZURE_OPENAI_WHISPER_DEPLOYMENT =
-    Deno.env.get("AZURE_OPENAI_WHISPER_DEPLOYMENT") || "whisper";
-  const AZURE_OPENAI_API_VERSION =
-    Deno.env.get("AZURE_OPENAI_API_VERSION") || "2024-06-01";
-
-  if (!AZURE_OPENAI_ENDPOINT || !AZURE_OPENAI_API_KEY) {
-    return new Response(
-      JSON.stringify({ error: "Azure OpenAI credentials not configured" }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+  const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+  if (!GROQ_API_KEY) {
+    return new Response(JSON.stringify({ error: "GROQ_API_KEY not configured" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
+
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -129,31 +127,29 @@ serve(async (req) => {
       });
     }
 
-    // Send to Whisper API (Azure OpenAI)
+    // Send to Whisper API (Groq — OpenAI-compatible endpoint)
     const fileName = upload.file_name || "audio.wav";
     const formData = new FormData();
     formData.append("file", new File([fileData], fileName, { type: fileData.type }));
-    formData.append("language", "so"); // Somali language hint
+    formData.append("model", "whisper-large-v3");
+    formData.append("language", "so"); // Somali
     formData.append("response_format", "verbose_json");
 
     // --- OpenAI Whisper (commented out — switched to Groq) ---
     // const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", { ... });
 
-    // --- Groq Whisper (commented out — switched to Azure OpenAI) ---
-    // const whisperResp = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    // --- Azure OpenAI Whisper (commented out — reverted to Groq, see note above) ---
+    // const azureBase = AZURE_OPENAI_ENDPOINT.replace(/\/$/, "");
+    // const whisperUrl = `${azureBase}/openai/deployments/${AZURE_OPENAI_WHISPER_DEPLOYMENT}/audio/transcriptions?api-version=${AZURE_OPENAI_API_VERSION}`;
+    // const whisperResp = await fetch(whisperUrl, {
     //   method: "POST",
-    //   headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+    //   headers: { "api-key": AZURE_OPENAI_API_KEY },
     //   body: formData,
     // });
 
-    // Azure OpenAI Whisper endpoint:
-    //   {endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version={version}
-    const azureBase = AZURE_OPENAI_ENDPOINT.replace(/\/$/, "");
-    const whisperUrl = `${azureBase}/openai/deployments/${AZURE_OPENAI_WHISPER_DEPLOYMENT}/audio/transcriptions?api-version=${AZURE_OPENAI_API_VERSION}`;
-
-    const whisperResp = await fetch(whisperUrl, {
+    const whisperResp = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
-      headers: { "api-key": AZURE_OPENAI_API_KEY },
+      headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
       body: formData,
     });
 
