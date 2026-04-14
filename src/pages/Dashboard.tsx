@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Clock, FileAudio, Languages, Zap, AlertTriangle, History } from "lucide-react";
 import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
-import AudioUploader, { type SomaliDialect } from "@/components/AudioUploader";
+import AudioUploader, { type UploadMetadata } from "@/components/AudioUploader";
 import RecentUploads from "@/components/RecentUploads";
 import StatsCard from "@/components/StatsCard";
 import UsageBar from "@/components/UsageBar";
@@ -88,7 +88,7 @@ const Dashboard = () => {
     });
   };
 
-  const handleFileSelected = async (file: File, dialect: SomaliDialect) => {
+  const handleFileSelected = async (file: File, metadata: UploadMetadata) => {
     if (!user) return;
 
     if (!hasCredits) {
@@ -124,9 +124,12 @@ const Dashboard = () => {
           file_name: file.name,
           file_path: filePath,
           file_size_bytes: file.size,
-          dialect,
+          dialect: metadata.dialect,
+          audio_quality: metadata.audio_quality,
+          speaker_gender: metadata.speaker_gender,
+          speaker_age_range: metadata.speaker_age_range,
           status: "uploaded",
-        })
+        } as any)
         .select("id")
         .single();
 

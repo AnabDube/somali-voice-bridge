@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
   Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
-  Pencil, Save, Clock, List,
+  Pencil, Save, Clock, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,6 +55,7 @@ const Transcript = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [showSegments, setShowSegments] = useState(false);
   const [activeSegment, setActiveSegment] = useState(-1);
+  const [verifying, setVerifying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const rafRef = useRef<number>();
@@ -182,6 +183,40 @@ const Transcript = () => {
     } else {
       startPolling();
     }
+  };
+
+  const handleToggleVerified = async () => {
+    if (!transcription?.id || !user) return;
+    if (!transcription.somali_text?.trim()) {
+      toast.error("Cannot verify an empty transcript.");
+      return;
+    }
+    setVerifying(true);
+    const newValue = !transcription.verified_for_training;
+    const { error } = await supabase
+      .from("transcriptions")
+      .update({
+        verified_for_training: newValue,
+        verified_by: newValue ? user.id : null,
+        verified_at: newValue ? new Date().toISOString() : null,
+      } as any)
+      .eq("id", transcription.id);
+    if (error) {
+      toast.error("Failed to update verification status.");
+    } else {
+      setTranscription((prev: any) => ({
+        ...prev,
+        verified_for_training: newValue,
+        verified_by: newValue ? user.id : null,
+        verified_at: newValue ? new Date().toISOString() : null,
+      }));
+      toast.success(
+        newValue
+          ? "Marked as verified — this transcript will be included in training data."
+          : "Verification removed."
+      );
+    }
+    setVerifying(false);
   };
 
   const handleEditSave = async () => {
@@ -315,9 +350,31 @@ const Transcript = () => {
                       {dialectLabel}
                     </Badge>
                   )}
+                  {transcription?.verified_for_training && (
+                    <Badge variant="default" className="gap-1 text-xs shrink-0">
+                      <ShieldCheck className="h-3 w-3" /> Verified for training
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground">Transcript & Translation</p>
               </div>
+              {transcription?.somali_text && !isEditing && (
+                <Button
+                  variant={transcription?.verified_for_training ? "secondary" : "outline"}
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  onClick={handleToggleVerified}
+                  disabled={verifying}
+                  title="Mark this transcript as accurate so it can be used to fine-tune the model"
+                >
+                  {verifying ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                  )}
+                  {transcription?.verified_for_training ? "Unverify" : "Verify for training"}
+                </Button>
+              )}
             </div>
 
             {/* Audio Player */}

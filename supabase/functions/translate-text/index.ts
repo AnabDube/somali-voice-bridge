@@ -14,9 +14,18 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) {
-    return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
+  // --- Lovable AI (commented out — switched to Groq) ---
+  // const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  // if (!LOVABLE_API_KEY) {
+  //   return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
+  //     status: 500,
+  //     headers: { ...corsHeaders, "Content-Type": "application/json" },
+  //   });
+  // }
+
+  const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+  if (!GROQ_API_KEY) {
+    return new Response(JSON.stringify({ error: "GROQ_API_KEY not configured" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -91,20 +100,44 @@ serve(async (req) => {
 
     const startTime = Date.now();
 
-    // Call Lovable AI for translation
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // --- Lovable AI call (commented out — switched to Groq) ---
+    // const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    //   method: "POST",
+    //   headers: {
+    //     Authorization: `Bearer ${LOVABLE_API_KEY}`,
+    //     "Content-Type": "application/json",
+    //   },
+    //   body: JSON.stringify({
+    //     model: "google/gemini-3-flash-preview",
+    //     messages: [
+    //       {
+    //         role: "system",
+    //         content:
+    //           "You are a professional Somali-to-English translator. Translate the given Somali text into clear, natural English. Preserve the original meaning, tone, and structure. Output ONLY the English translation, nothing else.",
+    //       },
+    //       {
+    //         role: "user",
+    //         content: transcription.somali_text,
+    //       },
+    //     ],
+    //   }),
+    // });
+
+    // Call Groq for translation (OpenAI-compatible chat completions)
+    const aiResp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.2,
         messages: [
           {
             role: "system",
             content:
-              "You are a professional Somali-to-English translator. Translate the given Somali text into clear, natural English. Preserve the original meaning, tone, and structure. Output ONLY the English translation, nothing else.",
+              "You are a professional Somali-to-English translator. Translate the given Somali text into clear, natural English. Preserve the original meaning, tone, and structure. Output ONLY the English translation, nothing else — no preamble, no explanations, no quotes.",
           },
           {
             role: "user",

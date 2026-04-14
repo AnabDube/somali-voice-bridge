@@ -10,6 +10,16 @@ const ACCEPTED_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "
 const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
 
 export type SomaliDialect = "standard" | "af_maay" | "northern" | "benaadir" | "other";
+export type AudioQuality = "clean" | "noisy" | "poor";
+export type SpeakerGender = "male" | "female" | "other" | "unknown";
+export type SpeakerAgeRange = "child" | "teen" | "adult" | "senior" | "unknown";
+
+export interface UploadMetadata {
+  dialect: SomaliDialect;
+  audio_quality: AudioQuality;
+  speaker_gender: SpeakerGender;
+  speaker_age_range: SpeakerAgeRange;
+}
 
 const DIALECT_OPTIONS: { value: SomaliDialect; label: string }[] = [
   { value: "standard", label: "Standard Somali" },
@@ -19,8 +29,29 @@ const DIALECT_OPTIONS: { value: SomaliDialect; label: string }[] = [
   { value: "other", label: "Other / Mixed" },
 ];
 
+const QUALITY_OPTIONS: { value: AudioQuality; label: string }[] = [
+  { value: "clean", label: "Clean (studio/quiet)" },
+  { value: "noisy", label: "Noisy (some background)" },
+  { value: "poor", label: "Poor (heavy noise)" },
+];
+
+const GENDER_OPTIONS: { value: SpeakerGender; label: string }[] = [
+  { value: "unknown", label: "Prefer not to say" },
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "other", label: "Other" },
+];
+
+const AGE_OPTIONS: { value: SpeakerAgeRange; label: string }[] = [
+  { value: "unknown", label: "Prefer not to say" },
+  { value: "child", label: "Child (< 13)" },
+  { value: "teen", label: "Teen (13–19)" },
+  { value: "adult", label: "Adult (20–59)" },
+  { value: "senior", label: "Senior (60+)" },
+];
+
 interface AudioUploaderProps {
-  onFileSelected: (file: File, dialect: SomaliDialect) => void;
+  onFileSelected: (file: File, metadata: UploadMetadata) => void;
   isUploading?: boolean;
   disabled?: boolean;
 }
@@ -30,6 +61,17 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [dialect, setDialect] = useState<SomaliDialect>("standard");
+  const [audioQuality, setAudioQuality] = useState<AudioQuality>("clean");
+  const [speakerGender, setSpeakerGender] = useState<SpeakerGender>("unknown");
+  const [speakerAgeRange, setSpeakerAgeRange] = useState<SpeakerAgeRange>("unknown");
+
+  const buildMetadata = (): UploadMetadata => ({
+    dialect,
+    audio_quality: audioQuality,
+    speaker_gender: speakerGender,
+    speaker_age_range: speakerAgeRange,
+  });
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
@@ -52,7 +94,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
     if (disabled) return;
     const file = e.dataTransfer.files[0];
     if (file && validateFile(file)) {
-      onFileSelected(file, dialect);
+      onFileSelected(file, buildMetadata());
     }
   }, [onFileSelected, disabled, dialect]);
 
@@ -60,7 +102,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
     if (disabled) return;
     const file = e.target.files?.[0];
     if (file && validateFile(file)) {
-      onFileSelected(file, dialect);
+      onFileSelected(file, buildMetadata());
     }
     e.target.value = "";
   };
@@ -79,7 +121,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         const file = new File([blob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
-        onFileSelected(file, dialect);
+        onFileSelected(file, buildMetadata());
         stream.getTracks().forEach((t) => t.stop());
       };
 
@@ -103,21 +145,52 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
 
   return (
     <div className="w-full space-y-3">
-      {/* Dialect Selector */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-muted-foreground">Dialect:</label>
-        <Select value={dialect} onValueChange={(v) => setDialect(v as SomaliDialect)}>
-          <SelectTrigger className="w-[220px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DIALECT_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      {/* Metadata — helps build a better training dataset */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Dialect</label>
+          <Select value={dialect} onValueChange={(v) => setDialect(v as SomaliDialect)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {DIALECT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Audio quality</label>
+          <Select value={audioQuality} onValueChange={(v) => setAudioQuality(v as AudioQuality)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {QUALITY_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Speaker gender</label>
+          <Select value={speakerGender} onValueChange={(v) => setSpeakerGender(v as SpeakerGender)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {GENDER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Speaker age</label>
+          <Select value={speakerAgeRange} onValueChange={(v) => setSpeakerAgeRange(v as SpeakerAgeRange)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {AGE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <motion.div

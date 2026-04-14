@@ -14,9 +14,18 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-  if (!OPENAI_API_KEY) {
-    return new Response(JSON.stringify({ error: "OPENAI_API_KEY not configured" }), {
+  // --- OpenAI Whisper (commented out — switched to Groq) ---
+  // const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+  // if (!OPENAI_API_KEY) {
+  //   return new Response(JSON.stringify({ error: "OPENAI_API_KEY not configured" }), {
+  //     status: 500,
+  //     headers: { ...corsHeaders, "Content-Type": "application/json" },
+  //   });
+  // }
+
+  const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+  if (!GROQ_API_KEY) {
+    return new Response(JSON.stringify({ error: "GROQ_API_KEY not configured" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -119,17 +128,24 @@ serve(async (req) => {
       });
     }
 
-    // Send to Whisper API
+    // Send to Whisper API (Groq — OpenAI-compatible endpoint)
     const fileName = upload.file_name || "audio.wav";
     const formData = new FormData();
     formData.append("file", new File([fileData], fileName, { type: fileData.type }));
-    formData.append("model", "whisper-1");
+    formData.append("model", "whisper-large-v3");
     formData.append("language", "so"); // Somali
     formData.append("response_format", "verbose_json");
 
-    const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    // --- OpenAI Whisper (commented out — switched to Groq) ---
+    // const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    //   method: "POST",
+    //   headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+    //   body: formData,
+    // });
+
+    const whisperResp = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
       body: formData,
     });
 
