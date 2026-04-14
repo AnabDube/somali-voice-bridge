@@ -68,7 +68,16 @@ serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check user's credit/minutes balance
+    // Admins bypass the minute limit entirely.
+    const { data: adminRoleRow } = await adminClient
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .eq("role", "admin")
+      .maybeSingle();
+    const isAdmin = !!adminRoleRow;
+
+    // Check user's credit/minutes balance (skipped for admins)
     const { data: profile, error: profileErr } = await adminClient
       .from("profiles")
       .select("minutes_used, minutes_limit")
@@ -82,15 +91,17 @@ serve(async (req) => {
       });
     }
 
-    const minutesRemaining = (profile.minutes_limit || 0) - (profile.minutes_used || 0);
-    if (minutesRemaining <= 0) {
-      return new Response(
-        JSON.stringify({
-          error: "no_credits",
-          message: "Transcription cannot proceed. No free credits available. Please add credits to continue.",
-        }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!isAdmin) {
+      const minutesRemaining = (profile.minutes_limit || 0) - (profile.minutes_used || 0);
+      if (minutesRemaining <= 0) {
+        return new Response(
+          JSON.stringify({
+            error: "no_credits",
+            message: "Transcription cannot proceed. No free credits available. Please add credits to continue.",
+          }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Verify the upload belongs to user
@@ -215,12 +226,14 @@ serve(async (req) => {
       .update({ status: "completed", duration_seconds: duration })
       .eq("id", upload_id);
 
-    // Atomically update user's minutes_used via RPC
+    // Atomically update user's minutes_used via RPC (skipped for admins)
     const durationMinutes = duration ? Math.ceil(duration / 60) : 1;
-    await adminClient.rpc("increment_minutes_used", {
-      p_user_id: userId,
-      p_minutes: durationMinutes,
-    });
+    if (!isAdmin) {
+      await adminClient.rpc("increment_minutes_used", {
+        p_user_id: userId,
+        p_minutes: durationMinutes,
+      });
+    }
 
     return new Response(
       JSON.stringify({
