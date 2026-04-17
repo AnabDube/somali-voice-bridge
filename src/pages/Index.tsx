@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Mic, Languages, Shield, Zap } from "lucide-react";
+import { ArrowRight, Mic, Languages, Shield, Zap, Upload, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Navbar";
 import { motion } from "framer-motion";
@@ -24,6 +24,24 @@ const features = [
     icon: Shield,
     title: "Private & Secure",
     description: "Your audio is encrypted and you control your data. Delete recordings anytime.",
+  },
+];
+
+const steps = [
+  {
+    icon: Upload,
+    title: "Upload or record",
+    description: "Drop in a Somali audio file or record directly from your browser.",
+  },
+  {
+    icon: FileText,
+    title: "Get your transcript",
+    description: "AI transcribes the audio into Somali text with timestamps in seconds.",
+  },
+  {
+    icon: Languages,
+    title: "Translate to English",
+    description: "Click translate to get a natural English version of the transcript.",
   },
 ];
 
@@ -88,6 +106,43 @@ const Index = () => {
             <Link to="/pricing">View Pricing</Link>
           </Button>
         </motion.div>
+      </section>
+
+      {/* How it works */}
+      <section className="container mx-auto px-4 pb-20">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
+            How it works
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Three steps from audio to translated text.
+          </p>
+        </div>
+
+        <div className="mt-10 grid gap-6 sm:grid-cols-3">
+          {steps.map((s, i) => (
+            <motion.div
+              key={s.title}
+              className="relative rounded-xl border border-border bg-card p-6 shadow-card"
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true }}
+              variants={fadeUp}
+              custom={i}
+            >
+              <div className="absolute -top-3 left-6 flex h-7 w-7 items-center justify-center rounded-full bg-gradient-gold text-xs font-bold text-primary-foreground shadow-card">
+                {i + 1}
+              </div>
+              <div className="mb-3 mt-2 flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                <s.icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <h3 className="font-display text-base font-semibold">{s.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                {s.description}
+              </p>
+            </motion.div>
+          ))}
+        </div>
       </section>
 
       {/* Features */}

@@ -50,10 +50,10 @@ const Navbar = () => {
           {user ? (
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">{profile?.display_name || user.email}</span>
-              <Button variant="ghost" size="icon" onClick={() => navigate("/settings")} title="Settings">
+              <Button variant="ghost" size="icon" onClick={() => navigate("/settings")} title="Settings" aria-label="Settings">
                 <Settings className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign out">
+              <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign out" aria-label="Sign out">
                 <LogOut className="h-4 w-4" />
               </Button>
             </div>
@@ -71,7 +71,11 @@ const Navbar = () => {
 
         <div className="flex items-center gap-2 md:hidden">
           <ThemeToggle />
-          <button onClick={() => setMobileOpen(!mobileOpen)}>
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileOpen}
+          >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>

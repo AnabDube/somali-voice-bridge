@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileAudio, Calendar, Clock, Trash2, Eye, Loader2 } from "lucide-react";
+import { FileAudio, Calendar, Clock, Trash2, Eye, Loader2, Upload, FileText, Languages } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,10 +68,61 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
 
   if (uploads.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card p-8 text-center shadow-card">
-        <FileAudio className="mx-auto h-10 w-10 text-muted-foreground/40" />
-        <p className="mt-3 font-display text-sm font-medium text-muted-foreground">No uploads yet</p>
-        <p className="mt-1 text-xs text-muted-foreground">Upload or record audio to get started</p>
+      <div className="rounded-xl border border-border bg-card p-6 shadow-card">
+        <div className="text-center">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <FileAudio className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <h3 className="font-display text-base font-semibold">Welcome — let's get your first transcript</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Here's how it works in 3 quick steps.
+          </p>
+        </div>
+
+        <ol className="mt-5 space-y-3">
+          <li className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/50 p-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-gold text-xs font-bold text-primary-foreground">
+              1
+            </span>
+            <div className="flex-1">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <Upload className="h-3.5 w-3.5 text-muted-foreground" />
+                Upload or record Somali audio
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Use the uploader above. Keep clips under 25 MB for best results.
+              </p>
+            </div>
+          </li>
+          <li className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/50 p-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-gold text-xs font-bold text-primary-foreground">
+              2
+            </span>
+            <div className="flex-1">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                Review the transcript
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                AI generates Somali text. Edit any mistakes, then verify for training.
+              </p>
+            </div>
+          </li>
+          <li className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/50 p-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-gold text-xs font-bold text-primary-foreground">
+              3
+            </span>
+            <div className="flex-1">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <Languages className="h-3.5 w-3.5 text-muted-foreground" />
+                Translate to English
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                One click to get a natural English translation of the transcript.
+              </p>
+            </div>
+          </li>
+        </ol>
       </div>
     );
   }
