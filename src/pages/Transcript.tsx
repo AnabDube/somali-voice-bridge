@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Loader2, FileAudio,
   Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
-  Pencil, Save, Clock, ShieldCheck,
+  Pencil, Save, Clock, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
+import ResearchSummaryPanel, { type ResearchSummary } from "@/components/ResearchSummaryPanel";
 
 interface Segment {
   id: number;
@@ -59,6 +60,8 @@ const Transcript = () => {
   const [showSegments, setShowSegments] = useState(false);
   const [activeSegment, setActiveSegment] = useState(-1);
   const [verifying, setVerifying] = useState(false);
+  const [showCleaned, setShowCleaned] = useState(true);
+  const [showResearch, setShowResearch] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
   const rafRef = useRef<number>();
@@ -80,7 +83,12 @@ const Transcript = () => {
         .single();
       if (t) {
         setTranscription(t);
-        if (t.english_text) stopPolling();
+        if (
+          t.english_text &&
+          t.somali_text_cleaned &&
+          t.english_text_research &&
+          t.research_summary
+        ) stopPolling();
       }
       const { data: uploadData } = await supabase
         .from("audio_uploads")
@@ -166,7 +174,11 @@ const Transcript = () => {
       if (t) setTranscription(t);
       setLoading(false);
 
-      if (uploadData.status === "processing" || (t?.somali_text && !t?.english_text)) {
+      if (
+        uploadData.status === "processing" ||
+        (t?.somali_text && !t?.english_text) ||
+        (t?.somali_text && !t?.somali_text_cleaned)
+      ) {
         startPolling();
       }
     };
@@ -293,6 +305,65 @@ const Transcript = () => {
     doc.save(`${userName}_${audioName}_${suffix}.pdf`);
   };
 
+  // Exports the structured summary as a Word-compatible HTML file.
+  // Pragmatic choice: Word opens HTML-as-.doc cleanly, and this avoids
+  // shipping a docx library in the frontend bundle. Users can Save As
+  // a real .docx from Word if they need one.
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const downloadSummaryDoc = () => {
+    if (!researchSummary) return;
+    const title = `Research Summary — ${upload?.file_name || "Audio"}`;
+    const themes = (researchSummary.key_themes || [])
+      .map((t) => `<li>${escapeHtml(t)}</li>`)
+      .join("");
+    const quotes = (researchSummary.notable_quotes || [])
+      .map(
+        (q) =>
+          `<blockquote><p><em>"${escapeHtml(q.quote)}"</em></p>${
+            q.context ? `<p style="color:#666;font-size:10pt;">${escapeHtml(q.context)}</p>` : ""
+          }</blockquote>`
+      )
+      .join("");
+    const actions = (researchSummary.action_points || [])
+      .map((p) => `<li>${escapeHtml(p)}</li>`)
+      .join("");
+
+    const html =
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>` +
+      `<body style="font-family:Calibri,Arial,sans-serif;">` +
+      `<h1>${escapeHtml(title)}</h1>` +
+      (researchSummary.overview
+        ? `<h2>Overview</h2><p>${escapeHtml(researchSummary.overview)}</p>`
+        : "") +
+      (themes ? `<h2>Key Themes</h2><ul>${themes}</ul>` : "") +
+      (quotes ? `<h2>Notable Quotes</h2>${quotes}` : "") +
+      (actions ? `<h2>Action Points</h2><ul>${actions}</ul>` : "") +
+      `</body></html>`;
+
+    const blob = new Blob([html], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${userName}_${audioName}_summary.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRetrySummary = async () => {
+    if (!transcription?.id) return;
+    const { error } = await supabase.functions.invoke("generate-summary", {
+      body: { transcription_id: transcription.id },
+    });
+    if (error) {
+      toast.error("Could not generate summary. Please try again.");
+    } else {
+      toast.success("Generating summary…");
+      startPolling();
+    }
+  };
+
   if (accessDenied) {
     return (
       <div className="min-h-screen bg-background">
@@ -313,10 +384,21 @@ const Transcript = () => {
 
   const isProcessing = upload?.status === "processing";
   const isFailed = upload?.status === "failed";
-  const somaliText = transcription?.somali_text || "";
-  const englishText = transcription?.english_text || "";
+  const somaliRaw = transcription?.somali_text || "";
+  const somaliCleaned = transcription?.somali_text_cleaned || "";
+  const hasCleaned = !!somaliCleaned;
+  const isCleaning = !!somaliRaw && !hasCleaned && transcription?.processing_stage !== "failed";
+  const somaliText = hasCleaned && showCleaned ? somaliCleaned : somaliRaw;
+  const englishStandard = transcription?.english_text || "";
+  const englishResearch = transcription?.english_text_research || "";
+  const hasResearch = !!englishResearch;
+  const englishText = showResearch && hasResearch ? englishResearch : englishStandard;
   const hasEnglish = !!englishText;
-  const isTranslating = !!somaliText && !hasEnglish && !translationFailed;
+  const isTranslating = !!somaliRaw && !englishStandard && !translationFailed;
+  const isResearchTranslating = !!somaliRaw && !hasResearch && !translationFailed;
+  const researchSummary: ResearchSummary | null = transcription?.research_summary ?? null;
+  const hasSummary = !!researchSummary && Object.keys(researchSummary).length > 0;
+  const isSummaryPending = !!englishStandard && !hasSummary;
   const dialectLabel = upload?.dialect ? DIALECT_LABELS[upload.dialect] || upload.dialect : null;
 
   return (
@@ -421,6 +503,7 @@ const Transcript = () => {
                 </p>
               </div>
             ) : (
+              <>
               <div className="grid gap-6 md:grid-cols-2">
                 {/* Somali Panel */}
                 <TranscriptPanelInline
@@ -433,7 +516,7 @@ const Transcript = () => {
                   onDownloadPdf={() => downloadPdf(somaliText, "Somali Transcript", "transcript")}
                   isEditing={isEditing}
                   editedText={editedText}
-                  onEditStart={() => { setEditedText(somaliText); setIsEditing(true); }}
+                  onEditStart={() => { setEditedText(somaliRaw); setIsEditing(true); }}
                   onEditChange={setEditedText}
                   onEditSave={handleEditSave}
                   onEditCancel={() => setIsEditing(false)}
@@ -443,6 +526,10 @@ const Transcript = () => {
                   onToggleSegments={() => setShowSegments(!showSegments)}
                   activeSegment={activeSegment}
                   onSeekTo={seekTo}
+                  hasCleaned={hasCleaned}
+                  isCleaning={isCleaning}
+                  showCleaned={showCleaned}
+                  onToggleCleaned={() => setShowCleaned(!showCleaned)}
                 />
 
                 {/* English Panel */}
@@ -455,10 +542,26 @@ const Transcript = () => {
                   onRetry={handleRetryTranslation}
                   copied={copiedEnglish}
                   onCopy={() => hasEnglish && handleCopy(englishText, "english")}
-                  onDownloadTxt={hasEnglish ? () => downloadTxt(englishText, "translation") : undefined}
-                  onDownloadPdf={hasEnglish ? () => downloadPdf(englishText, "English Translation", "translation") : undefined}
+                  onDownloadTxt={hasEnglish ? () => downloadTxt(englishText, showResearch ? "translation-research" : "translation") : undefined}
+                  onDownloadPdf={hasEnglish ? () => downloadPdf(englishText, showResearch ? "English Translation (Research)" : "English Translation", showResearch ? "translation-research" : "translation") : undefined}
+                  hasResearch={hasResearch}
+                  isResearchPending={isResearchTranslating}
+                  showResearch={showResearch}
+                  onToggleResearch={() => setShowResearch(!showResearch)}
                 />
               </div>
+
+              {somaliRaw && (
+                <div className="mt-6">
+                  <ResearchSummaryPanel
+                    summary={researchSummary}
+                    isPending={isSummaryPending}
+                    onExportDoc={downloadSummaryDoc}
+                    onRetry={hasEnglish ? handleRetrySummary : undefined}
+                  />
+                </div>
+              )}
+              </>
             )}
           </>
         )}
@@ -490,6 +593,14 @@ interface TranscriptPanelInlineProps {
   onToggleSegments?: () => void;
   activeSegment?: number;
   onSeekTo?: (seconds: number) => void;
+  hasCleaned?: boolean;
+  isCleaning?: boolean;
+  showCleaned?: boolean;
+  onToggleCleaned?: () => void;
+  hasResearch?: boolean;
+  isResearchPending?: boolean;
+  showResearch?: boolean;
+  onToggleResearch?: () => void;
 }
 
 const TranscriptPanelInline = ({
@@ -515,11 +626,59 @@ const TranscriptPanelInline = ({
   onToggleSegments,
   activeSegment = -1,
   onSeekTo,
+  hasCleaned,
+  isCleaning,
+  showCleaned,
+  onToggleCleaned,
+  hasResearch,
+  isResearchPending,
+  showResearch,
+  onToggleResearch,
 }: TranscriptPanelInlineProps) => (
   <div className="flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden">
     <div className="flex items-center justify-between border-b border-border px-5 py-3">
-      <h3 className="font-display text-sm font-semibold">{title}</h3>
+      <div className="flex items-center gap-2">
+        <h3 className="font-display text-sm font-semibold">{title}</h3>
+        {hasCleaned && showCleaned && !isEditing && (
+          <Badge variant="secondary" className="h-5 gap-1 text-[10px]">
+            <Sparkles className="h-2.5 w-2.5" /> Cleaned
+          </Badge>
+        )}
+        {isCleaning && !hasCleaned && !isEditing && (
+          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Loader2 className="h-2.5 w-2.5 animate-spin" /> Cleaning…
+          </span>
+        )}
+        {hasResearch && showResearch && !isEditing && (
+          <Badge variant="secondary" className="h-5 gap-1 text-[10px]">
+            <Sparkles className="h-2.5 w-2.5" /> Research
+          </Badge>
+        )}
+        {isResearchPending && !hasResearch && !isEditing && onToggleResearch && (
+          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Loader2 className="h-2.5 w-2.5 animate-spin" /> Research…
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-1">
+        {hasCleaned && !isEditing && onToggleCleaned && (
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleCleaned}>
+            {showCleaned ? (
+              <><FileText className="h-3.5 w-3.5" /> Raw</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" /> Cleaned</>
+            )}
+          </Button>
+        )}
+        {hasResearch && !isEditing && onToggleResearch && (
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleResearch}>
+            {showResearch ? (
+              <><FileText className="h-3.5 w-3.5" /> Standard</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" /> Research</>
+            )}
+          </Button>
+        )}
         {segments.length > 0 && !isEditing && onToggleSegments && (
           <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleSegments}>
             {showSegments ? (

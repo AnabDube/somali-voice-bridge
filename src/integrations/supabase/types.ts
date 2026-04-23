@@ -100,37 +100,64 @@ export type Database = {
           confidence_score: number | null
           created_at: string
           english_text: string | null
+          english_text_research: string | null
           id: string
+          processing_stage: string | null
           processing_time_ms: number | null
+          research_summary: Json | null
           somali_text: string | null
+          somali_text_cleaned: string | null
+          speaker_segments: Json | null
           speaker_timestamps: Json | null
+          terminology: Json | null
           updated_at: string
           upload_id: string
           user_id: string
+          verified_at: string | null
+          verified_by: string | null
+          verified_for_training: boolean
         }
         Insert: {
           confidence_score?: number | null
           created_at?: string
           english_text?: string | null
+          english_text_research?: string | null
           id?: string
+          processing_stage?: string | null
           processing_time_ms?: number | null
+          research_summary?: Json | null
           somali_text?: string | null
+          somali_text_cleaned?: string | null
+          speaker_segments?: Json | null
           speaker_timestamps?: Json | null
+          terminology?: Json | null
           updated_at?: string
           upload_id: string
           user_id: string
+          verified_at?: string | null
+          verified_by?: string | null
+          verified_for_training?: boolean
         }
         Update: {
           confidence_score?: number | null
           created_at?: string
           english_text?: string | null
+          english_text_research?: string | null
           id?: string
+          processing_stage?: string | null
           processing_time_ms?: number | null
+          research_summary?: Json | null
           somali_text?: string | null
+          somali_text_cleaned?: string | null
+          speaker_segments?: Json | null
           speaker_timestamps?: Json | null
+          terminology?: Json | null
           updated_at?: string
           upload_id?: string
           user_id?: string
+          verified_at?: string | null
+          verified_by?: string | null
+          verified_for_training?: boolean
         }
         Relationships: [
           {
