@@ -239,22 +239,53 @@ const Transcript = () => {
     setIsSaving(true);
     const { error } = await supabase
       .from("transcriptions")
-      .update({ somali_text: editedText.trim(), english_text: null })
+      .update({
+        somali_text: editedText.trim(),
+        somali_text_cleaned: null,
+        english_text: null,
+        english_text_research: null,
+        research_summary: null,
+        terminology: null,
+        processing_stage: null,
+      } as any)
       .eq("id", transcription.id);
     if (error) {
       toast.error("Failed to save edit.");
     } else {
-      setTranscription((prev: any) => ({ ...prev, somali_text: editedText.trim(), english_text: null }));
+      setTranscription((prev: any) => ({
+        ...prev,
+        somali_text: editedText.trim(),
+        somali_text_cleaned: null,
+        english_text: null,
+        english_text_research: null,
+        research_summary: null,
+        terminology: null,
+        processing_stage: null,
+      }));
       setIsEditing(false);
-      toast.success("Transcript updated. Re-translating…");
-      const { error: translateErr } = await supabase.functions.invoke("translate-text", {
-        body: { transcription_id: transcription.id },
-      });
+      toast.success("Transcript updated. Re-analysing…");
+      const transcriptionId = transcription.id;
+      const [translateResult] = await Promise.allSettled([
+        supabase.functions.invoke("translate-text", {
+          body: { transcription_id: transcriptionId },
+        }),
+        supabase.functions.invoke("process-transcript", {
+          body: { transcription_id: transcriptionId },
+        }),
+        supabase.functions.invoke("translate-research", {
+          body: { transcription_id: transcriptionId },
+        }),
+      ]);
+      const translateErr =
+        translateResult.status === "fulfilled" ? translateResult.value.error : translateResult.reason;
       if (translateErr) {
         setTranslationFailed(true);
       } else {
         setTranslationFailed(false);
         startPolling();
+        void supabase.functions.invoke("generate-summary", {
+          body: { transcription_id: transcriptionId },
+        });
       }
     }
     setIsSaving(false);
