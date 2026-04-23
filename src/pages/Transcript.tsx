@@ -99,7 +99,7 @@ const Transcript = () => {
         setUpload((prev: any) => (prev ? { ...prev, status: uploadData.status } : prev));
         if (uploadData.status === "failed") stopPolling();
       }
-    }, 3000);
+    }, 1500);
   }, [uploadId, stopPolling]);
 
   // Parse segments from transcription

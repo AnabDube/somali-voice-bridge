@@ -169,49 +169,32 @@ const Dashboard = () => {
         }
 
         if (fnData?.transcription_id) {
-          // Kick off standard translation, cleaning, and research translation
-          // in parallel — they write to different columns and don't depend on
-          // each other. translate-research uses cleaned text if available,
-          // otherwise raw — so if cleaning finishes first it'll benefit;
-          // otherwise it still produces a valid result.
-          const [translateResult, cleanResult, researchResult] = await Promise.allSettled([
-            supabase.functions.invoke("translate-text", {
-              body: { transcription_id: fnData.transcription_id },
-            }),
-            supabase.functions.invoke("process-transcript", {
-              body: { transcription_id: fnData.transcription_id },
-            }),
-            supabase.functions.invoke("translate-research", {
-              body: { transcription_id: fnData.transcription_id },
-            }),
-          ]);
+          // Fire the AI pipeline in the background — don't block the upload
+          // spinner on Groq latency. The Transcript page polls for results.
+          const transcriptionId = fnData.transcription_id;
+          void (async () => {
+            const [translateResult, , researchResult] = await Promise.allSettled([
+              supabase.functions.invoke("translate-text", {
+                body: { transcription_id: transcriptionId },
+              }),
+              supabase.functions.invoke("process-transcript", {
+                body: { transcription_id: transcriptionId },
+              }),
+              supabase.functions.invoke("translate-research", {
+                body: { transcription_id: transcriptionId },
+              }),
+            ]);
 
-          if (translateResult.status === "fulfilled" && translateResult.value.error) {
-            console.error("Translation error:", translateResult.value.error);
-            toast.error("Translation failed. You can retry from the transcript page.");
-          }
-          if (cleanResult.status === "fulfilled" && cleanResult.value.error) {
-            console.error("Cleaning error:", cleanResult.value.error);
-          }
-          if (researchResult.status === "fulfilled" && researchResult.value.error) {
-            console.error("Research translation error:", researchResult.value.error);
-          }
-
-          // Stage 2: summary needs English text, so run it after translations.
-          // Prefers research translation, falls back to standard — decided
-          // inside the edge function.
-          const translationSucceeded =
-            (translateResult.status === "fulfilled" && !translateResult.value.error) ||
-            (researchResult.status === "fulfilled" && !researchResult.value.error);
-          if (translationSucceeded) {
-            const { error: summaryErr } = await supabase.functions
-              .invoke("generate-summary", {
-                body: { transcription_id: fnData.transcription_id },
+            const translationSucceeded =
+              (translateResult.status === "fulfilled" && !translateResult.value.error) ||
+              (researchResult.status === "fulfilled" && !researchResult.value.error);
+            if (translationSucceeded) {
+              await supabase.functions.invoke("generate-summary", {
+                body: { transcription_id: transcriptionId },
               });
-            if (summaryErr) {
-              console.error("Summary error:", summaryErr);
             }
-          }
+            refetchProfile?.();
+          })();
         }
 
         fetchUploads();

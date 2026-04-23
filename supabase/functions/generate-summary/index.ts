@@ -117,22 +117,57 @@ serve(async (req) => {
       "Do NOT include commentary outside the JSON. Do NOT wrap in markdown fences. " +
       "Keep language neutral and factual.";
 
-    const summaryResp = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.3,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: summarySystem },
-          { role: "user", content: englishSource },
-        ],
+    // --- Call 2: terminology glossary ---
+    const terminologySystem =
+      "You are a terminology specialist analyzing a Somali audio transcript paired with its " +
+      "English translation. Extract a glossary of important terms.\n\n" +
+      "Respond with a JSON object of exactly this shape:\n" +
+      "{\n" +
+      '  "proper_nouns": [ { "somali": "<as written in Somali>", "english": "<english rendering or transliteration>", "type": "person" | "place" | "organization" | "other" }, ... ],\n' +
+      '  "domain_terms": [ { "somali": "<somali word or phrase>", "english": "<english translation>", "definition": "<one-line definition>" }, ... ],\n' +
+      '  "flags": [ { "somali": "<suspicious somali word>", "issue": "<what seems wrong — e.g. likely mis-transcription, unusual spelling, possible loan word>", "confidence": "low" | "medium" | "high" }, ... ]\n' +
+      "}\n\n" +
+      "Keep each list short — only genuinely notable items. If a category has nothing, use an empty array. " +
+      "Do NOT wrap the JSON in markdown fences. Do NOT add commentary.";
+
+    // Run summary + terminology in parallel — they don't depend on each other.
+    const [summaryResp, terminologyResp] = await Promise.all([
+      fetch(GROQ_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          temperature: 0.3,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: summarySystem },
+            { role: "user", content: englishSource },
+          ],
+        }),
       }),
-    });
+      fetch(GROQ_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: terminologySystem },
+            {
+              role: "user",
+              content: `SOMALI:\n${somaliSource}\n\nENGLISH:\n${englishSource}`,
+            },
+          ],
+        }),
+      }),
+    ]);
 
     if (!summaryResp.ok) {
       const errText = await summaryResp.text();
@@ -155,39 +190,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    // --- Call 2: terminology glossary ---
-    const terminologySystem =
-      "You are a terminology specialist analyzing a Somali audio transcript paired with its " +
-      "English translation. Extract a glossary of important terms.\n\n" +
-      "Respond with a JSON object of exactly this shape:\n" +
-      "{\n" +
-      '  "proper_nouns": [ { "somali": "<as written in Somali>", "english": "<english rendering or transliteration>", "type": "person" | "place" | "organization" | "other" }, ... ],\n' +
-      '  "domain_terms": [ { "somali": "<somali word or phrase>", "english": "<english translation>", "definition": "<one-line definition>" }, ... ],\n' +
-      '  "flags": [ { "somali": "<suspicious somali word>", "issue": "<what seems wrong — e.g. likely mis-transcription, unusual spelling, possible loan word>", "confidence": "low" | "medium" | "high" }, ... ]\n' +
-      "}\n\n" +
-      "Keep each list short — only genuinely notable items. If a category has nothing, use an empty array. " +
-      "Do NOT wrap the JSON in markdown fences. Do NOT add commentary.";
-
-    const terminologyResp = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: terminologySystem },
-          {
-            role: "user",
-            content: `SOMALI:\n${somaliSource}\n\nENGLISH:\n${englishSource}`,
-          },
-        ],
-      }),
-    });
 
     let terminology: any = null;
     if (terminologyResp.ok) {
