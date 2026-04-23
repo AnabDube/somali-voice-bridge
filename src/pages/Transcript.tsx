@@ -22,12 +22,15 @@ interface Segment {
   text: string;
 }
 
+// Current dialect options are maxaatiri + af_maay. Legacy keys kept so
+// older uploads still render with a readable label.
 const DIALECT_LABELS: Record<string, string> = {
-  standard: "Standard",
+  maxaatiri: "Maxaa-tiri",
   af_maay: "Af-Maay",
-  northern: "Northern",
-  benaadir: "Benaadir",
-  other: "Other",
+  standard: "Standard (legacy)",
+  northern: "Northern (legacy)",
+  benaadir: "Benaadir (legacy)",
+  other: "Other (legacy)",
 };
 
 const formatTimestamp = (seconds: number): string => {

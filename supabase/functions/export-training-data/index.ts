@@ -113,7 +113,7 @@ serve(async (req) => {
         audio_url: signed.signedUrl,
         transcription: row.somali_text.trim(),
         language: "so",
-        dialect: upload.dialect ?? "standard",
+        dialect: upload.dialect ?? "maxaatiri",
         audio_quality: upload.audio_quality ?? null,
         speaker_gender: upload.speaker_gender ?? null,
         speaker_age_range: upload.speaker_age_range ?? null,

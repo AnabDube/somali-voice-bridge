@@ -9,7 +9,8 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const ACCEPTED_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/webm"];
 const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
 
-export type SomaliDialect = "standard" | "af_maay" | "northern" | "benaadir" | "other";
+// The two main Somali language branches.
+export type SomaliDialect = "maxaatiri" | "af_maay";
 export type AudioQuality = "clean" | "noisy" | "poor";
 export type SpeakerGender = "male" | "female" | "other" | "unknown";
 export type SpeakerAgeRange = "child" | "teen" | "adult" | "senior" | "unknown";
@@ -22,11 +23,8 @@ export interface UploadMetadata {
 }
 
 const DIALECT_OPTIONS: { value: SomaliDialect; label: string }[] = [
-  { value: "standard", label: "Standard Somali" },
-  { value: "northern", label: "Northern (Isaaq/Dir)" },
-  { value: "benaadir", label: "Benaadir" },
+  { value: "maxaatiri", label: "Maxaa-tiri" },
   { value: "af_maay", label: "Af-Maay" },
-  { value: "other", label: "Other / Mixed" },
 ];
 
 const QUALITY_OPTIONS: { value: AudioQuality; label: string }[] = [
@@ -60,7 +58,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [dialect, setDialect] = useState<SomaliDialect>("standard");
+  const [dialect, setDialect] = useState<SomaliDialect>("maxaatiri");
   const [audioQuality, setAudioQuality] = useState<AudioQuality>("clean");
   const [speakerGender, setSpeakerGender] = useState<SpeakerGender>("unknown");
   const [speakerAgeRange, setSpeakerAgeRange] = useState<SpeakerAgeRange>("unknown");
