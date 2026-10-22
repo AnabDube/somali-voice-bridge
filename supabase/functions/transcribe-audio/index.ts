@@ -8,19 +8,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // --- OpenAI Whisper (commented out — switched to Groq) ---
-  // const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-
-  // --- Azure OpenAI Whisper (commented out — reverted to Groq because
-  //     Azure's Whisper deployment rejects language="so" as unsupported,
-  //     which caused mis-detection to Arabic for Somali audio) ---
-  // const AZURE_OPENAI_ENDPOINT = Deno.env.get("AZURE_OPENAI_ENDPOINT");
-  // const AZURE_OPENAI_API_KEY = Deno.env.get("AZURE_OPENAI_API_KEY");
-  // const AZURE_OPENAI_WHISPER_DEPLOYMENT =
-  //   Deno.env.get("AZURE_OPENAI_WHISPER_DEPLOYMENT") || "whisper";
-  // const AZURE_OPENAI_API_VERSION =
-  //   Deno.env.get("AZURE_OPENAI_API_VERSION") || "2024-06-01";
-
+  // Transcription uses Groq's Whisper endpoint. OpenAI and Azure OpenAI were
+  // tried and dropped: Azure's Whisper deployment rejects language="so", which
+  // made Somali audio get mis-detected as Arabic.
   const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
   if (!GROQ_API_KEY) {
     return new Response(JSON.stringify({ error: "GROQ_API_KEY not configured" }), {
@@ -119,6 +109,31 @@ serve(async (req) => {
       });
     }
 
+    // The minute balance is only charged after transcription finishes, so
+    // several simultaneous requests could each pass the check above and
+    // overdraw the balance. Allow one in-flight transcription per user
+    // (ignoring rows stuck in "processing" for over 10 minutes after a crash).
+    if (!isAdmin) {
+      const staleCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { count: inFlight } = await adminClient
+        .from("audio_uploads")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("status", "processing")
+        .neq("id", upload_id)
+        .gte("updated_at", staleCutoff);
+
+      if ((inFlight ?? 0) > 0) {
+        return new Response(
+          JSON.stringify({
+            error: "busy",
+            message: "Another transcription is still running. Please wait for it to finish, then try again.",
+          }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     // Update status to processing
     await adminClient
       .from("audio_uploads")
@@ -146,18 +161,6 @@ serve(async (req) => {
     formData.append("language", "so"); // Somali
     formData.append("response_format", "verbose_json");
 
-    // --- OpenAI Whisper (commented out — switched to Groq) ---
-    // const whisperResp = await fetch("https://api.openai.com/v1/audio/transcriptions", { ... });
-
-    // --- Azure OpenAI Whisper (commented out — reverted to Groq, see note above) ---
-    // const azureBase = AZURE_OPENAI_ENDPOINT.replace(/\/$/, "");
-    // const whisperUrl = `${azureBase}/openai/deployments/${AZURE_OPENAI_WHISPER_DEPLOYMENT}/audio/transcriptions?api-version=${AZURE_OPENAI_API_VERSION}`;
-    // const whisperResp = await fetch(whisperUrl, {
-    //   method: "POST",
-    //   headers: { "api-key": AZURE_OPENAI_API_KEY },
-    //   body: formData,
-    // });
-
     const whisperResp = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
@@ -177,10 +180,20 @@ serve(async (req) => {
           JSON.stringify({
             error: isQuota ? "no_credits" : "rate_limited",
             message: isQuota
-              ? "Transcription cannot proceed. No free credits available on the OpenAI account. Please add credits to continue."
+              ? "Transcription is temporarily unavailable because the speech-recognition service has run out of credits. Please try again later."
               : "Too many requests. Please wait a moment and try again.",
           }),
           { status: whisperResp.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (whisperResp.status === 413) {
+        return new Response(
+          JSON.stringify({
+            error: "file_too_large",
+            message: "This audio file is too large to transcribe. Please upload a shorter recording.",
+          }),
+          { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 

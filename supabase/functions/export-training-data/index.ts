@@ -4,7 +4,8 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 
 // Exports verified Somali transcripts as JSONL — one row per training sample.
 // Format matches what Hugging Face `datasets` library expects for Whisper fine-tuning.
-// Admin only.
+// Admin only. Exports only transcripts that an admin verified AND whose
+// uploader opted in to training use (audio_uploads.approved_for_training).
 
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -68,6 +69,7 @@ serve(async (req) => {
         verified_at,
         audio_uploads (
           id,
+          approved_for_training,
           file_path,
           file_name,
           duration_seconds,
@@ -95,7 +97,8 @@ serve(async (req) => {
 
     for (const row of rows ?? []) {
       const upload = (row as any).audio_uploads;
-      if (!upload?.file_path || !row.somali_text?.trim()) {
+      // Only recordings whose owner opted in to training use are exported.
+      if (!upload?.approved_for_training || !upload?.file_path || !row.somali_text?.trim()) {
         skipped++;
         continue;
       }

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mic, ArrowLeft, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
+import { friendlyAuthError } from "@/lib/authErrors";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -20,32 +21,42 @@ const Login = () => {
     setLoading(true);
     setShowResend(false);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (error) {
-      if (error.message.toLowerCase().includes("email not confirmed")) {
-        setShowResend(true);
+      if (error) {
+        if (error.message.toLowerCase().includes("email not confirmed")) {
+          setShowResend(true);
+        }
+        toast.error(friendlyAuthError(error));
+      } else {
+        toast.success("Welcome back!");
+        navigate("/dashboard");
       }
-      toast.error(error.message);
-    } else {
-      toast.success("Welcome back!");
-      navigate("/dashboard");
+    } catch (err) {
+      toast.error(friendlyAuthError(err));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleResendVerification = async () => {
     setResending(true);
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-    });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Verification email sent! Check your inbox.");
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+      });
+      if (error) {
+        toast.error(friendlyAuthError(error));
+      } else {
+        toast.success("Verification email sent! Check your inbox.");
+      }
+    } catch (err) {
+      toast.error(friendlyAuthError(err));
+    } finally {
+      setResending(false);
     }
-    setResending(false);
   };
 
   return (

@@ -192,6 +192,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_user_stats: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          user_id: string
+          upload_count: number
+          transcription_count: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

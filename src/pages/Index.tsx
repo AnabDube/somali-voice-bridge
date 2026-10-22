@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, Mic, Languages, Shield, Zap, Upload, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Navbar";
+import { useAuth } from "@/contexts/AuthContext";
 import { motion } from "framer-motion";
 
 const features = [
@@ -18,12 +19,12 @@ const features = [
   {
     icon: Zap,
     title: "Fast Processing",
-    description: "Get results in seconds, not minutes. Optimized for speed without sacrificing accuracy.",
+    description: "Your Somali transcript appears first, then the translation and summary fill in automatically.",
   },
   {
     icon: Shield,
     title: "Private & Secure",
-    description: "Your audio is encrypted and you control your data. Delete recordings anytime.",
+    description: "Your audio is stored privately and encrypted. It is only used to train AI models if you opt in, and you can delete recordings anytime.",
   },
 ];
 
@@ -36,12 +37,12 @@ const steps = [
   {
     icon: FileText,
     title: "Get your transcript",
-    description: "AI transcribes the audio into Somali text with timestamps in seconds.",
+    description: "AI transcribes the audio into Somali text with timestamps.",
   },
   {
     icon: Languages,
-    title: "Translate to English",
-    description: "Click translate to get a natural English version of the transcript.",
+    title: "Read it in English",
+    description: "A natural English translation and a research summary are generated automatically.",
   },
 ];
 
@@ -55,6 +56,8 @@ const fadeUp = {
 };
 
 const Index = () => {
+  const { user } = useAuth();
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -98,7 +101,7 @@ const Index = () => {
           custom={3}
         >
           <Button size="lg" className="gap-2 bg-gradient-gold text-primary-foreground hover:opacity-90" asChild>
-            <Link to="/dashboard">
+            <Link to={user ? "/dashboard" : "/signup"}>
               Start Transcribing <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>

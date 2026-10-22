@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mic, ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { friendlyAuthError } from "@/lib/authErrors";
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -22,22 +23,27 @@ const Signup = () => {
     }
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: { display_name: displayName },
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: { display_name: displayName },
+        },
+      });
 
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Check your email to confirm your account!");
-      navigate("/login");
+      if (error) {
+        toast.error(friendlyAuthError(error));
+      } else {
+        toast.success("Check your email to confirm your account!");
+        navigate("/login");
+      }
+    } catch (err) {
+      toast.error(friendlyAuthError(err));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

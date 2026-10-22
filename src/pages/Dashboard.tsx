@@ -128,6 +128,7 @@ const Dashboard = () => {
           audio_quality: metadata.audio_quality,
           speaker_gender: metadata.speaker_gender,
           speaker_age_range: metadata.speaker_age_range,
+          approved_for_training: metadata.training_consent,
           status: "uploaded",
         } as any)
         .select("id")

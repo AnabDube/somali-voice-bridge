@@ -12,8 +12,8 @@ import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { toast } from "sonner";
-import jsPDF from "jspdf";
 import ResearchSummaryPanel, { type ResearchSummary } from "@/components/ResearchSummaryPanel";
 
 interface Segment {
@@ -45,6 +45,7 @@ const Transcript = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { profile } = useProfile();
+  const isAdmin = useIsAdmin();
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [upload, setUpload] = useState<any>(null);
@@ -326,7 +327,9 @@ const Transcript = () => {
     URL.revokeObjectURL(url);
   };
 
-  const downloadPdf = (content: string, title: string, suffix: string) => {
+  // jsPDF is large, so it's only fetched when someone actually exports a PDF.
+  const downloadPdf = async (content: string, title: string, suffix: string) => {
+    const { default: jsPDF } = await import("jspdf");
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text(title, 20, 20);
@@ -474,7 +477,7 @@ const Transcript = () => {
                 </div>
                 <p className="text-sm text-muted-foreground">Transcript & Translation</p>
               </div>
-              {transcription?.somali_text && !isEditing && (
+              {isAdmin && transcription?.somali_text && !isEditing && (
                 <Button
                   variant={transcription?.verified_for_training ? "secondary" : "outline"}
                   size="sm"

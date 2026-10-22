@@ -12,7 +12,8 @@ import {
 import Navbar from "@/components/Navbar";
 import StatsCard from "@/components/StatsCard";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import type { Database } from "@/integrations/supabase/types";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { toast } from "sonner";
 
 interface UserRow {
@@ -39,61 +40,51 @@ const planLimits: Record<string, number> = {
   business: 9999,
 };
 
+// PostgREST returns at most 1000 rows per request, so page through profiles.
+const PROFILE_PAGE_SIZE = 1000;
+
 const Admin = () => {
-  const { user } = useAuth();
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const isAdmin = useIsAdmin();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [uploadSummary, setUploadSummary] = useState<Map<string, UploadSummary>>(new Map());
   const [loading, setLoading] = useState(true);
   const [updatingUser, setUpdatingUser] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    const checkAdmin = async () => {
-      const { data } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .eq("role", "admin");
-      setIsAdmin(!!data && data.length > 0);
-    };
-    checkAdmin();
-  }, [user]);
-
   const fetchData = async () => {
     setLoading(true);
 
-    const { data: profiles, error: profErr } = await supabase
-      .from("profiles")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const allProfiles: UserRow[] = [];
+    for (let from = 0; ; from += PROFILE_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .range(from, from + PROFILE_PAGE_SIZE - 1);
 
-    if (profErr) {
-      toast.error("Failed to load users");
-      setLoading(false);
-      return;
+      if (error) {
+        toast.error("Failed to load users");
+        setLoading(false);
+        return;
+      }
+      allProfiles.push(...((data ?? []) as UserRow[]));
+      if (!data || data.length < PROFILE_PAGE_SIZE) break;
+    }
+    setUsers(allProfiles);
+
+    // Counts are computed in the database (admin_user_stats) rather than by
+    // downloading every upload and transcription row.
+    const { data: stats, error: statsErr } = await supabase.rpc("admin_user_stats");
+    if (statsErr) {
+      toast.error("Failed to load usage stats");
     }
 
-    setUsers((profiles ?? []) as UserRow[]);
-
-    const { data: uploads } = await supabase
-      .from("audio_uploads")
-      .select("user_id, id");
-
-    const { data: transcriptions } = await supabase
-      .from("transcriptions")
-      .select("user_id, id");
-
     const summary = new Map<string, UploadSummary>();
-    (uploads ?? []).forEach((u) => {
-      const existing = summary.get(u.user_id) || { user_id: u.user_id, upload_count: 0, transcription_count: 0 };
-      existing.upload_count++;
-      summary.set(u.user_id, existing);
-    });
-    (transcriptions ?? []).forEach((t) => {
-      const existing = summary.get(t.user_id) || { user_id: t.user_id, upload_count: 0, transcription_count: 0 };
-      existing.transcription_count++;
-      summary.set(t.user_id, existing);
+    (stats ?? []).forEach((s) => {
+      summary.set(s.user_id, {
+        user_id: s.user_id,
+        upload_count: Number(s.upload_count),
+        transcription_count: Number(s.transcription_count),
+      });
     });
 
     setUploadSummary(summary);
@@ -111,7 +102,7 @@ const Admin = () => {
     const { error } = await supabase
       .from("profiles")
       .update({
-        subscription_plan: newPlan as any,
+        subscription_plan: newPlan as Database["public"]["Enums"]["subscription_plan"],
         minutes_limit: newLimit,
       })
       .eq("user_id", userId);

@@ -1,13 +1,12 @@
-import { useCallback, useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Upload, Mic, Square, FileAudio, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-const ACCEPTED_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/webm"];
-const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
+import { MAX_AUDIO_FILE_MB, extensionForMime, pickRecorderMimeType, validateAudioFile } from "@/lib/audio";
 
 // The two main Somali language branches.
 export type SomaliDialect = "maxaatiri" | "af_maay";
@@ -20,6 +19,8 @@ export interface UploadMetadata {
   audio_quality: AudioQuality;
   speaker_gender: SpeakerGender;
   speaker_age_range: SpeakerAgeRange;
+  /** User has opted in to this recording being used to improve Somali speech models. */
+  training_consent: boolean;
 }
 
 const DIALECT_OPTIONS: { value: SomaliDialect; label: string }[] = [
@@ -62,53 +63,80 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
   const [audioQuality, setAudioQuality] = useState<AudioQuality>("clean");
   const [speakerGender, setSpeakerGender] = useState<SpeakerGender>("unknown");
   const [speakerAgeRange, setSpeakerAgeRange] = useState<SpeakerAgeRange>("unknown");
+  const [trainingConsent, setTrainingConsent] = useState(false);
 
-  const buildMetadata = (): UploadMetadata => ({
+  // Handlers (especially the MediaRecorder callbacks, which outlive a render)
+  // read the latest selections through this ref instead of a stale closure.
+  const metadataRef = useRef<UploadMetadata>({
     dialect,
     audio_quality: audioQuality,
     speaker_gender: speakerGender,
     speaker_age_range: speakerAgeRange,
+    training_consent: trainingConsent,
   });
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
-
-  const validateFile = (file: File): boolean => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error("File too large. Maximum size is 50MB.");
-      return false;
-    }
-    if (!ACCEPTED_TYPES.includes(file.type) && !file.name.match(ACCEPTED_EXTENSIONS)) {
-      toast.error("Unsupported format. Please upload MP3, WAV, or M4A.");
-      return false;
-    }
-    return true;
+  metadataRef.current = {
+    dialect,
+    audio_quality: audioQuality,
+    speaker_gender: speakerGender,
+    speaker_age_range: speakerAgeRange,
+    training_consent: trainingConsent,
   };
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const onFileSelectedRef = useRef(onFileSelected);
+  onFileSelectedRef.current = onFileSelected;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+
+  const releaseMicrophone = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    clearInterval(intervalRef.current);
+  };
+
+  // If the user navigates away mid-recording, drop the recording and free the mic.
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      releaseMicrophone();
+    };
+  }, []);
+
+  const acceptFile = (file: File | undefined) => {
+    if (!file || disabledRef.current) return;
+    const problem = validateAudioFile(file);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    onFileSelectedRef.current(file, metadataRef.current);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (disabled) return;
-    const file = e.dataTransfer.files[0];
-    if (file && validateFile(file)) {
-      onFileSelected(file, buildMetadata());
-    }
-  }, [onFileSelected, disabled, dialect]);
+    acceptFile(e.dataTransfer.files[0]);
+  };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (disabled) return;
-    const file = e.target.files?.[0];
-    if (file && validateFile(file)) {
-      onFileSelected(file, buildMetadata());
-    }
+    acceptFile(e.target.files?.[0]);
     e.target.value = "";
   };
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      streamRef.current = stream;
+
+      const mimeType = pickRecorderMimeType();
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -117,10 +145,11 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const file = new File([blob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
-        onFileSelected(file, buildMetadata());
-        stream.getTracks().forEach((t) => t.stop());
+        const type = mediaRecorder.mimeType || mimeType;
+        const blob = new Blob(chunksRef.current, { type });
+        const file = new File([blob], `recording-${Date.now()}.${extensionForMime(type)}`, { type });
+        releaseMicrophone();
+        acceptFile(file);
       };
 
       mediaRecorder.start();
@@ -128,6 +157,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
       setRecordingTime(0);
       intervalRef.current = setInterval(() => setRecordingTime((t) => t + 1), 1000);
     } catch {
+      releaseMicrophone();
       toast.error("Microphone access denied. Please allow microphone access.");
     }
   };
@@ -146,9 +176,9 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
       {/* Metadata — helps build a better training dataset */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Dialect</label>
+          <Label htmlFor="upload-dialect" className="mb-1 block text-xs font-medium text-muted-foreground">Dialect</Label>
           <Select value={dialect} onValueChange={(v) => setDialect(v as SomaliDialect)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="upload-dialect"><SelectValue /></SelectTrigger>
             <SelectContent>
               {DIALECT_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -157,9 +187,9 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
           </Select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Audio quality</label>
+          <Label htmlFor="upload-quality" className="mb-1 block text-xs font-medium text-muted-foreground">Audio quality</Label>
           <Select value={audioQuality} onValueChange={(v) => setAudioQuality(v as AudioQuality)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="upload-quality"><SelectValue /></SelectTrigger>
             <SelectContent>
               {QUALITY_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -168,9 +198,9 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
           </Select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Speaker gender</label>
+          <Label htmlFor="upload-gender" className="mb-1 block text-xs font-medium text-muted-foreground">Speaker gender</Label>
           <Select value={speakerGender} onValueChange={(v) => setSpeakerGender(v as SpeakerGender)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="upload-gender"><SelectValue /></SelectTrigger>
             <SelectContent>
               {GENDER_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -179,9 +209,9 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
           </Select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Speaker age</label>
+          <Label htmlFor="upload-age" className="mb-1 block text-xs font-medium text-muted-foreground">Speaker age</Label>
           <Select value={speakerAgeRange} onValueChange={(v) => setSpeakerAgeRange(v as SpeakerAgeRange)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="upload-age"><SelectValue /></SelectTrigger>
             <SelectContent>
               {AGE_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -189,6 +219,20 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      {/* Opt-in only: recordings are never used for training unless this is ticked. */}
+      <div className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3">
+        <Checkbox
+          id="upload-training-consent"
+          checked={trainingConsent}
+          onCheckedChange={(checked) => setTrainingConsent(checked === true)}
+          className="mt-0.5"
+        />
+        <Label htmlFor="upload-training-consent" className="text-sm font-normal leading-snug text-muted-foreground">
+          Help improve Somali speech recognition: allow this recording and its reviewed transcript to be used
+          to train AI models. Optional. Leave unticked and your audio stays private.
+        </Label>
       </div>
 
       <motion.div
@@ -245,7 +289,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
               <div className="text-center">
                 <p className="font-display text-lg font-semibold">Upload Somali Audio</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Drag & drop MP3, WAV, or M4A files here (max 50MB)
+                  Drag & drop MP3, WAV, or M4A files here (max {MAX_AUDIO_FILE_MB}MB)
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-3">

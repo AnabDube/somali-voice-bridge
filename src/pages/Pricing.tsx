@@ -4,6 +4,7 @@ import Navbar from "@/components/Navbar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import { cn } from "@/lib/utils";
+import { SUPPORT_EMAIL } from "@/lib/constants";
 import { toast } from "sonner";
 
 const plans = [
@@ -18,8 +19,8 @@ const plans = [
       "30 minutes/month",
       "Somali transcription",
       "English translation",
+      "AI research summary",
       "TXT & PDF export",
-      "Copy to clipboard",
     ],
     cta: "Current Plan",
     popular: false,
@@ -34,9 +35,7 @@ const plans = [
     features: [
       "120 minutes/month",
       "Everything in Free",
-      "Faster processing",
-      "Upload history",
-      "Email support",
+      "4× the monthly minutes",
     ],
     cta: "Upgrade to Starter",
     popular: false,
@@ -51,9 +50,7 @@ const plans = [
     features: [
       "300 minutes/month",
       "Everything in Starter",
-      "Priority processing",
-      "Speaker timestamps",
-      "Priority support",
+      "10× the free minutes",
     ],
     cta: "Upgrade to Pro",
     popular: true,
@@ -68,9 +65,7 @@ const plans = [
     features: [
       "Unlimited minutes",
       "Everything in Pro",
-      "Custom integrations",
-      "Dedicated support",
-      "SLA guarantee",
+      "Tailored to your team",
     ],
     cta: "Contact Sales",
     popular: false,
@@ -84,10 +79,10 @@ const Pricing = () => {
 
   const handleUpgrade = (planId: string) => {
     if (planId === "business") {
-      toast.info("Please contact us at support@somalivoicebridge.com for Business plans.");
+      toast.info(`Please contact us at ${SUPPORT_EMAIL} for Business plans.`);
       return;
     }
-    toast.info("Payment integration coming soon. Contact support to upgrade your plan.");
+    toast.info(`Online payments are coming soon. Email ${SUPPORT_EMAIL} to upgrade your plan.`);
   };
 
   return (
@@ -168,8 +163,8 @@ const Pricing = () => {
 
         <p className="mt-10 text-center text-sm text-muted-foreground">
           Need a custom plan? Contact us at{" "}
-          <a href="mailto:support@somalivoicebridge.com" className="text-primary underline">
-            support@somalivoicebridge.com
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="text-primary underline">
+            {SUPPORT_EMAIL}
           </a>
         </p>
       </main>
