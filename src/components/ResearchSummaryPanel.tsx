@@ -1,4 +1,4 @@
-import { Sparkles, Loader2, FileText, AlertCircle } from "lucide-react";
+import { Sparkles, Loader2, FileText, AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -17,9 +17,11 @@ interface Props {
   isRetrying?: boolean;
   onExportDoc?: () => void;
   onRetry?: () => void;
+  /** Make a fresh summary from the current text (after the transcript was edited). */
+  onRegenerate?: () => void;
 }
 
-const ResearchSummaryPanel = ({ summary, isPending, errorMessage, isRetrying, onExportDoc, onRetry }: Props) => {
+const ResearchSummaryPanel = ({ summary, isPending, errorMessage, isRetrying, onExportDoc, onRetry, onRegenerate }: Props) => {
   const hasContent = !!summary && (
     !!summary.overview ||
     (summary.key_themes?.length ?? 0) > 0 ||
@@ -32,18 +34,25 @@ const ResearchSummaryPanel = ({ summary, isPending, errorMessage, isRetrying, on
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
-          <h3 className="font-display text-sm font-semibold">Research Summary</h3>
+          <h2 className="font-display text-sm font-semibold">Research Summary</h2>
           {isPending && !hasContent && (
             <Badge variant="secondary" className="h-5 gap-1 text-[10px]">
               <Loader2 className="h-2.5 w-2.5 animate-spin" /> Analysing
             </Badge>
           )}
         </div>
-        {hasContent && onExportDoc && (
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={onExportDoc}>
-            <FileText className="h-3.5 w-3.5" /> Export .doc
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {hasContent && onRegenerate && (
+            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onRegenerate} disabled={isRetrying || isPending}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Regenerate
+            </Button>
+          )}
+          {hasContent && onExportDoc && (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={onExportDoc}>
+              <FileText className="h-3.5 w-3.5" /> Export .doc
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="p-5">

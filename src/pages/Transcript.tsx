@@ -1,14 +1,12 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-  ArrowLeft, Copy, Check, Loader2, FileAudio,
-  Download, FileText, FileType, AlertCircle, ShieldAlert, Play, Pause,
-  Pencil, Save, Clock, ShieldCheck, Sparkles,
-} from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, FileAudio, FileText, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import Navbar from "@/components/Navbar";
+import StatusBadge from "@/components/StatusBadge";
+import ResearchSummaryPanel, { type ResearchSummary } from "@/components/ResearchSummaryPanel";
+import TranscriptWorkspace from "@/components/transcript/TranscriptWorkspace";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
@@ -16,17 +14,7 @@ import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useProcessingSteps } from "@/hooks/useProcessingSteps";
 import { useRetryStep } from "@/hooks/useRetryStep";
 import { deriveDisplayStatus, type StepName } from "@/lib/pipeline";
-import { readFunctionError } from "@/lib/functionErrors";
-import StatusBadge from "@/components/StatusBadge";
 import { toast } from "sonner";
-import ResearchSummaryPanel, { type ResearchSummary } from "@/components/ResearchSummaryPanel";
-
-interface Segment {
-  id: number;
-  start: number;
-  end: number;
-  text: string;
-}
 
 // Current dialect options are maxaatiri + af_maay. Legacy keys kept so
 // older uploads still render with a readable label.
@@ -39,11 +27,7 @@ const DIALECT_LABELS: Record<string, string> = {
   other: "Other (legacy)",
 };
 
-const formatTimestamp = (seconds: number): string => {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-};
+const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 
 const Transcript = () => {
   const { uploadId } = useParams<{ uploadId: string }>();
@@ -53,22 +37,15 @@ const Transcript = () => {
   const isAdmin = useIsAdmin();
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+  // The rows come straight from the database; the workspace and this page only read the fields they need.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [upload, setUpload] = useState<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [transcription, setTranscription] = useState<any>(null);
-  const [copiedSomali, setCopiedSomali] = useState(false);
-  const [copiedEnglish, setCopiedEnglish] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedText, setEditedText] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [showSegments, setShowSegments] = useState(false);
-  const [activeSegment, setActiveSegment] = useState(-1);
+  const [speed, setSpeed] = useState(1);
   const [verifying, setVerifying] = useState(false);
-  const [showCleaned, setShowCleaned] = useState(true);
-  const [showResearch, setShowResearch] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const rafRef = useRef<number>();
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Live status of every step for this recording. It updates by itself (no
   // refresh), and the same data and derivation drive the dashboard badges, so
@@ -98,89 +75,42 @@ const Transcript = () => {
 
   // Whenever a step changes, reload the transcript so new text appears.
   const stepSignature = Object.values(steps)
-    .map((s) => `${s?.step}:${s?.status}:${s?.updated_at}`)
+    .map((s) => `${s?.step}:${s?.status}:${s?.updated_at}:${s?.progress ?? ""}`)
     .join("|");
   useEffect(() => {
     if (!loading && !accessDenied) refreshData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepSignature]);
 
-  // Parse segments from transcription
-  const segments: Segment[] = (() => {
-    try {
-      const raw = transcription?.speaker_timestamps;
-      if (!raw || !Array.isArray(raw)) return [];
-      return raw.filter((s: any) => typeof s.start === "number" && typeof s.end === "number" && s.text);
-    } catch {
-      return [];
-    }
-  })();
-
-  // RAF loop to track active segment
-  useEffect(() => {
-    const tick = () => {
-      if (audioRef.current && !audioRef.current.paused && segments.length > 0) {
-        const ct = audioRef.current.currentTime;
-        const idx = segments.findIndex((s) => ct >= s.start && ct < s.end);
-        setActiveSegment(idx);
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    if (isPlaying && segments.length > 0) {
-      rafRef.current = requestAnimationFrame(tick);
-    }
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [isPlaying, segments]);
-
-  const seekTo = (seconds: number) => {
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = seconds;
-    audioRef.current.play();
-    setIsPlaying(true);
-  };
-
   useEffect(() => {
     if (!uploadId || !user) return;
 
     const fetchData = async () => {
       setLoading(true);
-      const { data: uploadData, error: uploadErr } = await supabase
-        .from("audio_uploads")
-        .select("*")
-        .eq("id", uploadId)
-        .single();
+      const { data: uploadData, error: uploadErr } = await supabase.from("audio_uploads").select("*").eq("id", uploadId).single();
 
-      if (uploadErr || !uploadData) {
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-      if (uploadData.user_id !== user.id) {
+      if (uploadErr || !uploadData || uploadData.user_id !== user.id) {
         setAccessDenied(true);
         setLoading(false);
         return;
       }
       setUpload(uploadData);
 
-      const { data: signedData } = await supabase.storage
-        .from("audio-uploads")
-        .createSignedUrl(uploadData.file_path, 3600);
+      const { data: signedData } = await supabase.storage.from("audio-uploads").createSignedUrl(uploadData.file_path, 3600);
       if (signedData?.signedUrl) setAudioUrl(signedData.signedUrl);
 
-      const { data: t } = await supabase
-        .from("transcriptions")
-        .select("*")
-        .eq("upload_id", uploadId)
-        .single();
+      const { data: t } = await supabase.from("transcriptions").select("*").eq("upload_id", uploadId).maybeSingle();
       if (t) setTranscription(t);
       setLoading(false);
-
     };
     fetchData();
   }, [uploadId, user]);
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = speed;
+  }, [speed, audioUrl]);
+
+  // --------------------------------------------------------------- actions
   const handleToggleVerified = async () => {
     if (!transcription?.id || !user) return;
     if (!transcription.somali_text?.trim()) {
@@ -195,12 +125,12 @@ const Transcript = () => {
         verified_for_training: newValue,
         verified_by: newValue ? user.id : null,
         verified_at: newValue ? new Date().toISOString() : null,
-      } as any)
+      })
       .eq("id", transcription.id);
     if (error) {
       toast.error("Failed to update verification status.");
     } else {
-      setTranscription((prev: any) => ({
+      setTranscription((prev: Record<string, unknown>) => ({
         ...prev,
         verified_for_training: newValue,
         verified_by: newValue ? user.id : null,
@@ -208,142 +138,67 @@ const Transcript = () => {
       }));
       toast.success(
         newValue
-          ? "Marked as verified — this transcript will be included in training data."
-          : "Verification removed."
+          ? "Marked as verified. The corrected text will be included in training data (only if the uploader opted in)."
+          : "Verification removed.",
       );
     }
     setVerifying(false);
   };
 
-  const handleEditSave = async () => {
-    if (!transcription?.id || !editedText.trim()) return;
-    setIsSaving(true);
-    const { error } = await supabase
-      .from("transcriptions")
-      .update({
-        somali_text: editedText.trim(),
-        somali_text_cleaned: null,
-        english_text: null,
-        english_text_research: null,
-        research_summary: null,
-        terminology: null,
-        translation_progress: null,
-        summary_notes: null,
-        processing_stage: null,
-      } as any)
-      .eq("id", transcription.id);
+  const handleMarkReviewed = async () => {
+    if (!transcription?.id) return;
+    const reviewedAt = new Date().toISOString();
+    const { error } = await supabase.from("transcriptions").update({ reviewed_at: reviewedAt }).eq("id", transcription.id);
     if (error) {
-      toast.error("Failed to save edit.");
-    } else {
-      setTranscription((prev: any) => ({
-        ...prev,
-        somali_text: editedText.trim(),
-        somali_text_cleaned: null,
-        english_text: null,
-        english_text_research: null,
-        research_summary: null,
-        terminology: null,
-        translation_progress: null,
-        summary_notes: null,
-        processing_stage: null,
-      }));
-      setIsEditing(false);
-      toast.success("Transcript updated. Re-analysing…");
-
-      // The derived steps (cleaning, translation, summary) must run again on the
-      // new text: mark them pending, then let the server do the work. Progress
-      // shows up live, so there is nothing to wait for here.
-      await supabase.rpc("reset_pipeline_steps", { p_upload: uploadId! });
-      refetchSteps();
-      supabase.functions.invoke("run-pipeline", { body: { upload_id: uploadId } }).then(async ({ error: pipelineError }) => {
-        if (pipelineError) {
-          toast.error((await readFunctionError(pipelineError)) ?? "Could not start re-analysis. Use Retry on the step that failed.");
-        }
-        refetchSteps();
-      });
+      toast.error("Couldn't mark the transcript as reviewed. Please try again.");
+      return;
     }
-    setIsSaving(false);
+    setTranscription((prev: Record<string, unknown>) => ({ ...prev, reviewed_at: reviewedAt }));
+    toast.success("Marked as reviewed.");
   };
 
-  const togglePlayback = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
+  // A new summary from the current (possibly corrected) text.
+  const handleRegenerateSummary = async () => {
+    if (!transcription?.id) return;
+    const { error } = await supabase
+      .from("transcriptions")
+      .update({ research_summary: null, terminology: null, summary_notes: null })
+      .eq("id", transcription.id);
+    if (error) {
+      toast.error("Couldn't start a new summary. Please try again.");
+      return;
     }
-    setIsPlaying(!isPlaying);
+    setTranscription((prev: Record<string, unknown>) => ({ ...prev, research_summary: null, terminology: null, summary_notes: null }));
+    retryStep("summary");
   };
 
   const userName = profile?.display_name?.replace(/\s+/g, "_") || "user";
   const audioName = upload?.file_name?.replace(/\.[^.]+$/, "").replace(/\s+/g, "_") || "audio";
 
-  const handleCopy = async (text: string, type: "somali" | "english") => {
-    await navigator.clipboard.writeText(text);
-    if (type === "somali") {
-      setCopiedSomali(true);
-      setTimeout(() => setCopiedSomali(false), 2000);
-    } else {
-      setCopiedEnglish(true);
-      setTimeout(() => setCopiedEnglish(false), 2000);
-    }
-    toast.success("Copied to clipboard");
-  };
-
-  const downloadTxt = (content: string, suffix: string) => {
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${userName}_${audioName}_${suffix}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // jsPDF is large, so it's only fetched when someone actually exports a PDF.
-  const downloadPdf = async (content: string, title: string, suffix: string) => {
-    const { default: jsPDF } = await import("jspdf");
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text(title, 20, 20);
-    doc.setFontSize(11);
-    const lines = doc.splitTextToSize(content, 170);
-    doc.text(lines, 20, 35);
-    doc.save(`${userName}_${audioName}_${suffix}.pdf`);
-  };
-
   // Exports the structured summary as a Word-compatible HTML file.
-  // Pragmatic choice: Word opens HTML-as-.doc cleanly, and this avoids
-  // shipping a docx library in the frontend bundle. Users can Save As
-  // a real .docx from Word if they need one.
-  const escapeHtml = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const researchSummary: ResearchSummary | null = transcription?.research_summary ?? null;
 
   const downloadSummaryDoc = () => {
     if (!researchSummary) return;
     const title = `Research Summary — ${upload?.file_name || "Audio"}`;
-    const themes = (researchSummary.key_themes || [])
-      .map((t) => `<li>${escapeHtml(t)}</li>`)
-      .join("");
+    const themes = (researchSummary.key_themes || []).map((t) => `<li>${escapeHtml(t)}</li>`).join("");
     const quotes = (researchSummary.notable_quotes || [])
       .map(
         (q) =>
           `<blockquote><p><em>"${escapeHtml(q.quote)}"</em></p>${
             q.context ? `<p style="color:#666;font-size:10pt;">${escapeHtml(q.context)}</p>` : ""
-          }</blockquote>`
+          }</blockquote>`,
       )
       .join("");
-    const actions = (researchSummary.action_points || [])
-      .map((p) => `<li>${escapeHtml(p)}</li>`)
-      .join("");
+    const actions = (researchSummary.action_points || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
 
     const html =
       `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>` +
       `<body style="font-family:Calibri,Arial,sans-serif;">` +
       `<h1>${escapeHtml(title)}</h1>` +
-      (researchSummary.overview
-        ? `<h2>Overview</h2><p>${escapeHtml(researchSummary.overview)}</p>`
-        : "") +
+      (researchSummary.overview ? `<h2>Overview</h2><p>${escapeHtml(researchSummary.overview)}</p>` : "") +
       (themes ? `<h2>Key Themes</h2><ul>${themes}</ul>` : "") +
       (quotes ? `<h2>Notable Quotes</h2>${quotes}` : "") +
       (actions ? `<h2>Action Points</h2><ul>${actions}</ul>` : "") +
@@ -365,9 +220,7 @@ const Transcript = () => {
         <main className="container mx-auto max-w-6xl px-4 pb-12 pt-24 text-center">
           <ShieldAlert className="mx-auto h-12 w-12 text-destructive" />
           <h1 className="mt-4 font-display text-2xl font-bold">Access Denied</h1>
-          <p className="mt-2 text-muted-foreground">
-            You don't have permission to view this transcript.
-          </p>
+          <p className="mt-2 text-muted-foreground">You don't have permission to view this transcript.</p>
           <Button variant="outline" className="mt-6" onClick={() => navigate("/dashboard")}>
             Back to Dashboard
           </Button>
@@ -378,29 +231,14 @@ const Transcript = () => {
 
   // What is happening comes from the step rows, never guessed from which text
   // columns happen to be empty. The Somali transcript is shown as soon as it
-  // exists; translation, cleaning and summary only add to it, and a failure in
-  // any of them never hides it.
+  // exists; translation and summary only add to it, and a failure in either
+  // never hides it.
   const stepActive = (name: StepName) => steps[name]?.status === "pending" || steps[name]?.status === "processing";
   const transcribing = display.busy && !display.transcriptReady;
   const transcriptionFailed = display.tone === "failed" && !display.transcriptReady;
 
-  const somaliRaw = transcription?.somali_text || "";
-  const somaliCleaned = transcription?.somali_text_cleaned || "";
-  const hasCleaned = !!somaliCleaned;
-  const isCleaning = !!somaliRaw && !hasCleaned && stepActive("cleaning");
-  const somaliText = hasCleaned && showCleaned ? somaliCleaned : somaliRaw;
-  const englishStandard = transcription?.english_text || "";
-  const englishResearch = transcription?.english_text_research || "";
-  const hasResearch = !!englishResearch;
-  const englishText = showResearch && hasResearch ? englishResearch : englishStandard;
-  const hasEnglish = !!englishText;
-  const isTranslating = !!somaliRaw && !englishStandard && stepActive("translation");
-  // No English and nothing running to produce it: it failed (or never ran).
-  const translationDidFail = !!somaliRaw && !englishStandard && !isTranslating;
-  const translationError =
-    steps.translation?.error_message ?? "Translation did not finish. You can retry it.";
-  const isResearchTranslating = !!somaliRaw && !hasResearch && stepActive("research");
-  const researchSummary: ResearchSummary | null = transcription?.research_summary ?? null;
+  const hasEnglish = !!transcription?.english_text;
+  const translationActive = !hasEnglish && stepActive("translation");
   const hasSummary = !!researchSummary && Object.keys(researchSummary).length > 0;
   const isSummaryPending = !hasSummary && stepActive("summary");
   const summaryError = !hasSummary && steps.summary?.status === "failed" ? steps.summary.error_message : null;
@@ -410,11 +248,7 @@ const Transcript = () => {
     <div className="min-h-screen bg-background">
       <Navbar />
       <main className="container mx-auto max-w-6xl px-4 pb-12 pt-24">
-        <Button
-          variant="ghost"
-          className="mb-6 gap-2 text-muted-foreground"
-          onClick={() => navigate("/dashboard")}
-        >
+        <Button variant="ghost" className="mb-6 gap-2 text-muted-foreground" onClick={() => navigate("/dashboard")}>
           <ArrowLeft className="h-4 w-4" /> Back to Dashboard
         </Button>
 
@@ -426,68 +260,66 @@ const Transcript = () => {
         ) : (
           <>
             {/* Header */}
-            <div className="mb-6 flex items-start gap-4">
+            <div className="mb-5 flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-muted">
                 <FileAudio className="h-6 w-6 text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="font-display text-xl font-bold truncate">
-                    {upload?.file_name || "Audio File"}
-                  </h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="truncate font-display text-xl font-bold">{upload?.file_name || "Audio File"}</h1>
                   {dialectLabel && (
-                    <Badge variant="secondary" className="text-xs shrink-0">
+                    <Badge variant="secondary" className="shrink-0 text-xs">
                       {dialectLabel}
                     </Badge>
                   )}
                   {transcription?.verified_for_training && (
-                    <Badge variant="default" className="gap-1 text-xs shrink-0">
+                    <Badge variant="default" className="shrink-0 gap-1 text-xs">
                       <ShieldCheck className="h-3 w-3" /> Verified for training
+                    </Badge>
+                  )}
+                  {transcription?.reviewed_at && (
+                    <Badge variant="outline" className="shrink-0 gap-1 text-xs">
+                      <Check className="h-3 w-3" aria-hidden="true" /> Reviewed
                     </Badge>
                   )}
                   <StatusBadge status={display} />
                 </div>
-                <p className="text-sm text-muted-foreground">Transcript & Translation</p>
+                <p className="text-sm text-muted-foreground">Transcript &amp; translation</p>
               </div>
-              {isAdmin && transcription?.somali_text && !isEditing && (
+              {isAdmin && transcription?.somali_text && (
                 <Button
                   variant={transcription?.verified_for_training ? "secondary" : "outline"}
                   size="sm"
-                  className="gap-1.5 shrink-0"
+                  className="shrink-0 gap-1.5"
                   onClick={handleToggleVerified}
                   disabled={verifying}
-                  title="Mark this transcript as accurate so it can be used to fine-tune the model"
+                  title="Mark this transcript as accurate so its corrected text can be used to fine-tune the model"
                 >
-                  {verifying ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                  )}
+                  {verifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                   {transcription?.verified_for_training ? "Unverify" : "Verify for training"}
                 </Button>
               )}
             </div>
 
-            {/* Audio Player */}
+            {/* Audio player: stays in view while you work through the transcript */}
             {audioUrl && (
-              <div className="mb-6 flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-card">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={togglePlayback}
-                >
-                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                </Button>
-                <audio
-                  ref={audioRef}
-                  src={audioUrl}
-                  onEnded={() => setIsPlaying(false)}
-                  onPause={() => setIsPlaying(false)}
-                  onPlay={() => setIsPlaying(true)}
-                  className="w-full"
-                  controls
-                />
+              /* Sticky on larger screens; on a phone it would take too much of the screen, so it scrolls with the page. */
+            <div className="z-30 mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card/95 p-3 shadow-card backdrop-blur sm:sticky sm:top-16">
+                <audio ref={audioRef} src={audioUrl} className="min-w-[14rem] flex-1" controls preload="metadata" aria-label="Recording" />
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  Speed
+                  <select
+                    value={speed}
+                    onChange={(e) => setSpeed(Number(e.target.value))}
+                    className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {SPEEDS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}×
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             )}
 
@@ -496,19 +328,15 @@ const Transcript = () => {
                 <Loader2 className="mx-auto h-10 w-10 animate-spin text-primary" />
                 <p className="mt-4 font-display text-lg font-semibold">{display.label}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This may take a minute depending on the file length. You can leave this page — it keeps going
-                  and will be ready when you come back.
+                  This may take a minute depending on the file length. You can leave this page — it keeps going and will be
+                  ready when you come back.
                 </p>
               </div>
             ) : transcriptionFailed ? (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
                 <AlertCircle className="mx-auto h-8 w-8 text-destructive" />
-                <p className="mt-3 font-display text-lg font-semibold text-destructive">
-                  {display.label}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {display.detail ?? "Something went wrong. Please retry."}
-                </p>
+                <p className="mt-3 font-display text-lg font-semibold text-destructive">{display.label}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{display.detail ?? "Something went wrong. Please retry."}</p>
                 {display.failedStep === "transcription" && (
                   <Button
                     variant="outline"
@@ -517,77 +345,47 @@ const Transcript = () => {
                     disabled={!!uploadId && isRetrying(uploadId, "transcription")}
                     onClick={() => retryStep("transcription")}
                   >
-                    {uploadId && isRetrying(uploadId, "transcription") ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : null}
+                    {uploadId && isRetrying(uploadId, "transcription") ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                     Retry transcription
                   </Button>
                 )}
               </div>
-            ) : (
-              <>
-              <div className="grid gap-6 md:grid-cols-2">
-                {/* Somali Panel */}
-                <TranscriptPanelInline
-                  title="Somali Transcript"
-                  content={somaliText || "No transcript available yet."}
-                  hasContent={!!somaliText}
-                  copied={copiedSomali}
-                  onCopy={() => somaliText && handleCopy(somaliText, "somali")}
-                  onDownloadTxt={() => downloadTxt(somaliText, "transcript")}
-                  onDownloadPdf={() => downloadPdf(somaliText, "Somali Transcript", "transcript")}
-                  isEditing={isEditing}
-                  editedText={editedText}
-                  onEditStart={() => { setEditedText(somaliRaw); setIsEditing(true); }}
-                  onEditChange={setEditedText}
-                  onEditSave={handleEditSave}
-                  onEditCancel={() => setIsEditing(false)}
-                  isSaving={isSaving}
-                  segments={segments}
-                  showSegments={showSegments}
-                  onToggleSegments={() => setShowSegments(!showSegments)}
-                  activeSegment={activeSegment}
-                  onSeekTo={seekTo}
-                  hasCleaned={hasCleaned}
-                  isCleaning={isCleaning}
-                  showCleaned={showCleaned}
-                  onToggleCleaned={() => setShowCleaned(!showCleaned)}
+            ) : transcription ? (
+              <div className="space-y-6">
+                <TranscriptWorkspace
+                  transcription={transcription}
+                  fileName={upload?.file_name || "Transcript"}
+                  userName={userName}
+                  audioName={audioName}
+                  audioRef={audioRef}
+                  hasAudio={!!audioUrl}
+                  translation={{
+                    active: translationActive,
+                    failed: !hasEnglish && !translationActive,
+                    error: steps.translation?.error_message ?? "Translation did not finish.",
+                    progress: steps.translation?.progress ?? null,
+                    retrying: !!uploadId && isRetrying(uploadId, "translation"),
+                  }}
+                  onRetryTranslation={() => retryStep("translation")}
+                  onTranscriptChanged={refreshData}
+                  onMarkReviewed={handleMarkReviewed}
                 />
 
-                {/* English Panel */}
-                <TranscriptPanelInline
-                  title="English Translation"
-                  content={hasEnglish ? englishText : translationDidFail ? "" : "Translating…"}
-                  hasContent={hasEnglish}
-                  isPending={isTranslating}
-                  isFailed={translationDidFail}
-                  errorMessage={translationError}
-                  onRetry={() => retryStep("translation")}
-                  isRetrying={!!uploadId && isRetrying(uploadId, "translation")}
-                  copied={copiedEnglish}
-                  onCopy={() => hasEnglish && handleCopy(englishText, "english")}
-                  onDownloadTxt={hasEnglish ? () => downloadTxt(englishText, showResearch ? "translation-research" : "translation") : undefined}
-                  onDownloadPdf={hasEnglish ? () => downloadPdf(englishText, showResearch ? "English Translation (Research)" : "English Translation", showResearch ? "translation-research" : "translation") : undefined}
-                  hasResearch={hasResearch}
-                  isResearchPending={isResearchTranslating}
-                  showResearch={showResearch}
-                  onToggleResearch={() => setShowResearch(!showResearch)}
+                <ResearchSummaryPanel
+                  summary={researchSummary}
+                  isPending={isSummaryPending}
+                  errorMessage={summaryError}
+                  isRetrying={!!uploadId && isRetrying(uploadId, "summary")}
+                  onExportDoc={downloadSummaryDoc}
+                  onRetry={hasEnglish ? () => retryStep("summary") : undefined}
+                  onRegenerate={hasEnglish ? handleRegenerateSummary : undefined}
                 />
               </div>
-
-              {somaliRaw && (
-                <div className="mt-6">
-                  <ResearchSummaryPanel
-                    summary={researchSummary}
-                    isPending={isSummaryPending}
-                    errorMessage={summaryError}
-                    isRetrying={!!uploadId && isRetrying(uploadId, "summary")}
-                    onExportDoc={downloadSummaryDoc}
-                    onRetry={hasEnglish ? () => retryStep("summary") : undefined}
-                  />
-                </div>
-              )}
-              </>
+            ) : (
+              <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
+                <FileText className="mx-auto mb-3 h-8 w-8 text-muted-foreground/50" />
+                There is no transcript for this recording yet.
+              </div>
             )}
           </>
         )}
@@ -595,235 +393,5 @@ const Transcript = () => {
     </div>
   );
 };
-
-interface TranscriptPanelInlineProps {
-  title: string;
-  content: string;
-  hasContent: boolean;
-  isPending?: boolean;
-  isFailed?: boolean;
-  errorMessage?: string | null;
-  isRetrying?: boolean;
-  onRetry?: () => void;
-  copied: boolean;
-  onCopy: () => void;
-  onDownloadTxt?: () => void;
-  onDownloadPdf?: () => void;
-  isEditing?: boolean;
-  editedText?: string;
-  onEditStart?: () => void;
-  onEditChange?: (text: string) => void;
-  onEditSave?: () => void;
-  onEditCancel?: () => void;
-  isSaving?: boolean;
-  segments?: Segment[];
-  showSegments?: boolean;
-  onToggleSegments?: () => void;
-  activeSegment?: number;
-  onSeekTo?: (seconds: number) => void;
-  hasCleaned?: boolean;
-  isCleaning?: boolean;
-  showCleaned?: boolean;
-  onToggleCleaned?: () => void;
-  hasResearch?: boolean;
-  isResearchPending?: boolean;
-  showResearch?: boolean;
-  onToggleResearch?: () => void;
-}
-
-const TranscriptPanelInline = ({
-  title,
-  content,
-  hasContent,
-  isPending,
-  isFailed,
-  errorMessage,
-  isRetrying,
-  onRetry,
-  copied,
-  onCopy,
-  onDownloadTxt,
-  onDownloadPdf,
-  isEditing,
-  editedText,
-  onEditStart,
-  onEditChange,
-  onEditSave,
-  onEditCancel,
-  isSaving,
-  segments = [],
-  showSegments,
-  onToggleSegments,
-  activeSegment = -1,
-  onSeekTo,
-  hasCleaned,
-  isCleaning,
-  showCleaned,
-  onToggleCleaned,
-  hasResearch,
-  isResearchPending,
-  showResearch,
-  onToggleResearch,
-}: TranscriptPanelInlineProps) => (
-  <div className="flex flex-col rounded-xl border border-border bg-card shadow-card overflow-hidden">
-    <div className="flex items-center justify-between border-b border-border px-5 py-3">
-      <div className="flex items-center gap-2">
-        <h3 className="font-display text-sm font-semibold">{title}</h3>
-        {hasCleaned && showCleaned && !isEditing && (
-          <Badge variant="secondary" className="h-5 gap-1 text-[10px]">
-            <Sparkles className="h-2.5 w-2.5" /> Cleaned
-          </Badge>
-        )}
-        {isCleaning && !hasCleaned && !isEditing && (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Loader2 className="h-2.5 w-2.5 animate-spin" /> Cleaning…
-          </span>
-        )}
-        {hasResearch && showResearch && !isEditing && (
-          <Badge variant="secondary" className="h-5 gap-1 text-[10px]">
-            <Sparkles className="h-2.5 w-2.5" /> Research
-          </Badge>
-        )}
-        {isResearchPending && !hasResearch && !isEditing && onToggleResearch && (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Loader2 className="h-2.5 w-2.5 animate-spin" /> Research…
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-1">
-        {hasCleaned && !isEditing && onToggleCleaned && (
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleCleaned}>
-            {showCleaned ? (
-              <><FileText className="h-3.5 w-3.5" /> Raw</>
-            ) : (
-              <><Sparkles className="h-3.5 w-3.5" /> Cleaned</>
-            )}
-          </Button>
-        )}
-        {hasResearch && !isEditing && onToggleResearch && (
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleResearch}>
-            {showResearch ? (
-              <><FileText className="h-3.5 w-3.5" /> Standard</>
-            ) : (
-              <><Sparkles className="h-3.5 w-3.5" /> Research</>
-            )}
-          </Button>
-        )}
-        {segments.length > 0 && !isEditing && onToggleSegments && (
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onToggleSegments}>
-            {showSegments ? (
-              <><FileText className="h-3.5 w-3.5" /> Plain</>
-            ) : (
-              <><Clock className="h-3.5 w-3.5" /> Timestamps</>
-            )}
-          </Button>
-        )}
-        {hasContent && !isEditing && onEditStart && (
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onEditStart}>
-            <Pencil className="h-3.5 w-3.5" /> Edit
-          </Button>
-        )}
-        {isEditing && (
-          <>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onEditCancel} disabled={isSaving}>
-              Cancel
-            </Button>
-            <Button variant="default" size="sm" className="gap-1.5 text-xs" onClick={onEditSave} disabled={isSaving}>
-              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              Save & Re-translate
-            </Button>
-          </>
-        )}
-        {hasContent && !isEditing && (
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onCopy}>
-            {copied ? (
-              <><Check className="h-3.5 w-3.5" /> Copied</>
-            ) : (
-              <><Copy className="h-3.5 w-3.5" /> Copy</>
-            )}
-          </Button>
-        )}
-      </div>
-    </div>
-
-    <div className="flex-1 overflow-y-auto p-5" style={{ maxHeight: "400px" }}>
-      {isFailed ? (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <AlertCircle className="h-6 w-6 text-destructive" />
-          <p className="mt-3 text-sm font-medium text-destructive">Translation failed</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {errorMessage ?? "Something went wrong. Please try again."}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">Your Somali transcript is not affected.</p>
-          {onRetry && (
-            <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={onRetry} disabled={isRetrying}>
-              {isRetrying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Retry Translation
-            </Button>
-          )}
-        </div>
-      ) : isPending ? (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/50" />
-          <p className="mt-3 text-sm italic text-muted-foreground">{content}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Translation will appear here shortly.
-          </p>
-        </div>
-      ) : isEditing ? (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Edit the transcript below if it's incorrect. Saving will re-translate.
-          </p>
-          <Textarea
-            value={editedText}
-            onChange={(e) => onEditChange?.(e.target.value)}
-            className="min-h-[200px] text-sm leading-relaxed"
-            disabled={isSaving}
-          />
-        </div>
-      ) : showSegments && segments.length > 0 ? (
-        <div className="space-y-1">
-          {segments.map((seg, i) => (
-            <div
-              key={seg.id ?? i}
-              className={`flex items-start gap-3 rounded-lg px-3 py-2 transition-colors ${
-                i === activeSegment ? "bg-primary/10" : "hover:bg-muted/50"
-              }`}
-            >
-              <button
-                onClick={() => onSeekTo?.(seg.start)}
-                className="mt-0.5 shrink-0 rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
-              >
-                {formatTimestamp(seg.start)}
-              </button>
-              <span className="text-sm leading-relaxed">{seg.text}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>
-      )}
-    </div>
-
-    {hasContent && !isEditing && (onDownloadTxt || onDownloadPdf) && (
-      <div className="flex items-center gap-2 border-t border-border px-5 py-3">
-        <Download className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">Export:</span>
-        {onDownloadTxt && (
-          <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={onDownloadTxt}>
-            <FileText className="h-3 w-3" /> TXT
-          </Button>
-        )}
-        {onDownloadPdf && (
-          <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={onDownloadPdf}>
-            <FileType className="h-3 w-3" /> PDF
-          </Button>
-        )}
-      </div>
-    )}
-  </div>
-);
 
 export default Transcript;

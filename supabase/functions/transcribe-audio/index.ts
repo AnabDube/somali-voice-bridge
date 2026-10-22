@@ -273,6 +273,12 @@ serve(async (req) => {
       );
     }
 
+    // The workspace works on segments (timing, confidence, speaker, edits).
+    const { error: segmentsErr } = await adminClient.rpc("ensure_segments", {
+      p_transcription: transcriptionRow?.id,
+    });
+    if (segmentsErr) console.error("ensure_segments failed:", segmentsErr);
+
     // Update upload status + duration
     await adminClient
       .from("audio_uploads")

@@ -62,6 +62,17 @@ upload → transcription → cleaning / translation / research translation → s
 - A pg_cron watchdog (`fail-stuck-steps`, every minute) marks stuck steps as failed so nothing hangs silently. Each failed step has its own Retry button; the server claims a step before working, so double-clicking Retry does nothing extra and minutes are charged only once per recording.
 - The dashboard, history and transcript pages all derive their status from the same step rows (`src/lib/pipeline.ts`), and update live over Supabase Realtime.
 
+## Transcript workspace
+
+The transcript is stored as **segments** (`transcript_segments`): timing, Whisper's confidence measures, an optional speaker, the current (possibly corrected) text, and the model's original text, which can never be changed. `transcriptions.somali_text` stays the single "current text" that translation, summaries and the training export read; a trigger keeps it in step with the segments. Older transcripts are converted by the migration, and `ensure_segments()` converts any that appear later.
+
+- Click a timestamp to seek the audio; the segment being spoken is highlighted and followed.
+- Segments with a low Whisper confidence (`avg_logprob < -1.0`, or a high compression ratio / no-speech probability) are underlined and labelled "Check this part". On a Somali test recording only `avg_logprob` tracked real errors, so the flag is Whisper's own standard rule.
+- Edit in place, label speakers (rename everywhere in one action), find and replace with saved corrections, and search.
+- English is shown beside the Somali it translates, in **sections** of about a minute or two (translation works in sections that remember which segments they cover). A section is flagged when a segment in it is edited afterwards, and can be re-translated on its own.
+- Export TXT (Somali, English, both), SRT, Word and PDF, with timestamps and speaker names.
+- Only the parts of a long transcript near the screen are drawn (`@tanstack/react-virtual`), so a two-hour interview stays fast.
+
 ## Security model
 
 - Row-level security on every table; users can only read and write their own rows.

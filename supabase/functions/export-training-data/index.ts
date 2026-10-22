@@ -91,6 +91,22 @@ serve(async (req) => {
 
     // --- Build JSONL: one record per line ---
     // We generate signed URLs (24h) so the training script can fetch each audio file.
+    // Segments carry both the corrected text and what the model originally said.
+    const transcriptionIds = (rows ?? []).map((r) => r.id);
+    const { data: segmentRows } = transcriptionIds.length
+      ? await adminClient
+          .from("transcript_segments")
+          .select("transcription_id, idx, text, original_text, edited_at")
+          .in("transcription_id", transcriptionIds)
+          .order("idx")
+      : { data: [] };
+    const segmentsByTranscript = new Map<string, { text: string; original_text: string; edited_at: string | null }[]>();
+    for (const seg of segmentRows ?? []) {
+      const list = segmentsByTranscript.get(seg.transcription_id) ?? [];
+      list.push(seg);
+      segmentsByTranscript.set(seg.transcription_id, list);
+    }
+
     const lines: string[] = [];
     let exported = 0;
     let skipped = 0;
@@ -114,7 +130,12 @@ serve(async (req) => {
 
       lines.push(JSON.stringify({
         audio_url: signed.signedUrl,
+        // The human-corrected text (kept in step with the segments), and the machine
+        // output it started from, so the size of the corrections can be measured.
         transcription: row.somali_text.trim(),
+        original_transcription: (segmentsByTranscript.get(row.id) ?? []).map((s) => s.original_text).join(" ").trim() || null,
+        edited_segments: (segmentsByTranscript.get(row.id) ?? []).filter((s) => s.edited_at).length,
+        total_segments: (segmentsByTranscript.get(row.id) ?? []).length,
         language: "so",
         dialect: upload.dialect ?? "maxaatiri",
         audio_quality: upload.audio_quality ?? null,

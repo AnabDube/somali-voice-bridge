@@ -55,16 +55,20 @@ export const finalizeChunkedTranscription = async (ctx: FinalizeContext): Promis
     return { ok: false, reason: "too_long", message };
   }
 
-  const { error: saveError } = await admin.from("transcriptions").upsert(
-    {
-      upload_id: uploadId,
-      user_id: userId,
-      somali_text: stitched.text,
-      confidence_score: null,
-      speaker_timestamps: stitched.segments.length > 0 ? stitched.segments : null,
-    },
-    { onConflict: "upload_id" },
-  );
+  const { data: saved, error: saveError } = await admin
+    .from("transcriptions")
+    .upsert(
+      {
+        upload_id: uploadId,
+        user_id: userId,
+        somali_text: stitched.text,
+        confidence_score: null,
+        speaker_timestamps: stitched.segments.length > 0 ? stitched.segments : null,
+      },
+      { onConflict: "upload_id" },
+    )
+    .select("id")
+    .single();
   if (saveError) {
     console.error("finalize: saving the transcript failed:", saveError);
     const message = "We couldn't save the transcript. Please retry.";
@@ -72,6 +76,10 @@ export const finalizeChunkedTranscription = async (ctx: FinalizeContext): Promis
     await admin.from("audio_uploads").update({ status: "failed" }).eq("id", uploadId);
     return { ok: false, reason: "save_failed", message };
   }
+
+  // The workspace works on segments (timing, confidence, speaker, edits).
+  const { error: segmentsError } = await admin.rpc("ensure_segments", { p_transcription: saved?.id });
+  if (segmentsError) console.error("finalize: ensure_segments failed:", segmentsError);
 
   await admin
     .from("audio_uploads")

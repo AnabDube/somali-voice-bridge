@@ -179,6 +179,29 @@ export type Database = {
         }
         Relationships: []
       }
+      transcript_segments: {
+        Row: {
+          avg_logprob: number | null
+          compression_ratio: number | null
+          created_at: string
+          edited_at: string | null
+          end_seconds: number | null
+          id: string
+          idx: number
+          no_speech_prob: number | null
+          original_text: string
+          speaker: string | null
+          start_seconds: number | null
+          text: string
+          transcription_id: string
+          updated_at: string
+          upload_id: string
+          user_id: string
+        }
+        Insert: never
+        Update: never
+        Relationships: []
+      }
       transcriptions: {
         Row: {
           confidence_score: number | null
@@ -189,6 +212,7 @@ export type Database = {
           processing_stage: string | null
           processing_time_ms: number | null
           research_summary: Json | null
+          reviewed_at: string | null
           somali_text: string | null
           somali_text_cleaned: string | null
           speaker_segments: Json | null
@@ -212,6 +236,9 @@ export type Database = {
           processing_stage?: string | null
           processing_time_ms?: number | null
           research_summary?: Json | null
+          reviewed_at?: string | null
+          summary_notes?: Json | null
+          translation_progress?: Json | null
           somali_text?: string | null
           somali_text_cleaned?: string | null
           speaker_segments?: Json | null
@@ -233,6 +260,9 @@ export type Database = {
           processing_stage?: string | null
           processing_time_ms?: number | null
           research_summary?: Json | null
+          reviewed_at?: string | null
+          summary_notes?: Json | null
+          translation_progress?: Json | null
           somali_text?: string | null
           somali_text_cleaned?: string | null
           speaker_segments?: Json | null
@@ -254,6 +284,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_glossary: {
+        Row: {
+          created_at: string
+          find_text: string
+          id: string
+          replace_text: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          find_text: string
+          id?: string
+          replace_text: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          find_text?: string
+          id?: string
+          replace_text?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_roles: {
         Row: {
@@ -296,6 +350,18 @@ export type Database = {
       increment_minutes_used: {
         Args: { p_minutes: number; p_user_id: string }
         Returns: undefined
+      }
+      ensure_segments: {
+        Args: { p_transcription: string }
+        Returns: number
+      }
+      rename_speaker: {
+        Args: { p_from: string | null; p_to: string; p_transcription: string }
+        Returns: number
+      }
+      update_segments: {
+        Args: { p_updates: Json }
+        Returns: number
       }
       register_chunks: {
         Args: { p_chunks: Json; p_upload: string }
