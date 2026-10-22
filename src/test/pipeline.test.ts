@@ -57,6 +57,30 @@ describe("deriveDisplayStatus", () => {
     expect(s).toMatchObject({ label: "Transcript ready, translating…", tone: "working", busy: true, transcriptReady: true });
   });
 
+  it("shows how far a long job has got", () => {
+    const withProgress = (step: StepName, progress: string) =>
+      toStepMap(
+        Object.entries({ ...allDone, [step]: "processing" }).map(([name, status]) => ({
+          upload_id: "u1",
+          step: name as StepName,
+          status: status as StepStatus,
+          error_message: null,
+          progress: name === step ? progress : null,
+          attempts: 1,
+          updated_at: "2026-10-22T10:00:00Z",
+        })),
+      );
+    expect(deriveDisplayStatus("processing", withProgress("transcription", "3 of 9 parts")).label).toBe(
+      "Transcribing… (3 of 9 parts)",
+    );
+    expect(deriveDisplayStatus("completed", withProgress("translation", "14 of 40 parts")).label).toBe(
+      "Transcript ready, translating… (14 of 40 parts)",
+    );
+    expect(deriveDisplayStatus("completed", withProgress("summary", "2 of 12 parts")).label).toBe(
+      "Transcript ready, summarising… (2 of 12 parts)",
+    );
+  });
+
   it("treats a queued (pending) translation as running, not ready", () => {
     const s = deriveDisplayStatus("completed", steps({ ...allDone, translation: "pending" }));
     expect(s.label).toBe("Transcript ready, translating…");

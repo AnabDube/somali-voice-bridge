@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Clock, FileAudio, Languages, Zap, AlertTriangle, History } from "lucide-react";
 import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
@@ -9,12 +9,13 @@ import UsageBar from "@/components/UsageBar";
 import { Button } from "@/components/ui/button";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/contexts/AuthContext";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { useProcessingSteps } from "@/hooks/useProcessingSteps";
 import { useRetryStep } from "@/hooks/useRetryStep";
 import { supabase } from "@/integrations/supabase/client";
 import { deriveDisplayStatus } from "@/lib/pipeline";
-import { friendlyUploadError } from "@/lib/audio";
-import { readFunctionError } from "@/lib/functionErrors";
+import { friendlyUploadError, getAudioDuration } from "@/lib/audio";
+import { UploadError, uploadRecording, type UploadPhase } from "@/lib/uploadRecording";
 import { toast } from "sonner";
 
 const planLabels: Record<string, string> = {
@@ -36,9 +37,12 @@ interface AudioUploadRow {
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const isAdmin = useIsAdmin();
   const { profile, refetch: refetchProfile } = useProfile();
   const [uploads, setUploads] = useState<AudioUploadRow[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [phase, setPhase] = useState<UploadPhase | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchUploads = useCallback(async () => {
     if (!user) return;
@@ -86,23 +90,10 @@ const Dashboard = () => {
   const minutesLimit = profile?.minutes_limit ?? 30;
   const minutesRemaining = Math.max(0, minutesLimit - minutesUsed);
   const plan = profile?.subscription_plan ?? "free";
-  const hasCredits = minutesRemaining > 0;
-  const isLowCredits = minutesRemaining > 0 && minutesRemaining <= 5;
-
-  const getAudioDuration = (file: File): Promise<number> => {
-    return new Promise((resolve) => {
-      const audio = new Audio();
-      audio.addEventListener("loadedmetadata", () => {
-        resolve(audio.duration);
-        URL.revokeObjectURL(audio.src);
-      });
-      audio.addEventListener("error", () => {
-        resolve(0);
-        URL.revokeObjectURL(audio.src);
-      });
-      audio.src = URL.createObjectURL(file);
-    });
-  };
+  // Admins' usage is recorded but never blocked.
+  const unlimited = isAdmin === true;
+  const hasCredits = unlimited || minutesRemaining > 0;
+  const isLowCredits = !unlimited && minutesRemaining > 0 && minutesRemaining <= 5;
 
   const handleFileSelected = async (file: File, metadata: UploadMetadata) => {
     if (!user) return;
@@ -113,7 +104,7 @@ const Dashboard = () => {
     }
 
     const durationSec = await getAudioDuration(file);
-    if (durationSec > 0) {
+    if (!unlimited && durationSec > 0) {
       const durationMin = Math.ceil(durationSec / 60);
       if (durationMin > minutesRemaining) {
         toast.error(
@@ -123,105 +114,66 @@ const Dashboard = () => {
       }
     }
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setPhase(null);
     setIsUploading(true);
-    const filePath = `${user.id}/${Date.now()}-${file.name}`;
-    let uploadId: string | null = null;
 
     try {
-      // 1. Record the recording first, so even a failed upload is visible in
-      //    the list with the reason, instead of vanishing.
-      const { data: inserted, error: dbError } = await supabase
-        .from("audio_uploads")
-        .insert({
-          user_id: user.id,
-          file_name: file.name,
-          file_path: filePath,
-          file_size_bytes: file.size,
-          duration_seconds: durationSec > 0 ? durationSec : null,
-          dialect: metadata.dialect,
-          audio_quality: metadata.audio_quality,
-          speaker_gender: metadata.speaker_gender,
-          speaker_age_range: metadata.speaker_age_range,
-          approved_for_training: metadata.training_consent,
-          status: "uploaded",
-        } as any)
-        .select("id")
-        .single();
-
-      if (dbError || !inserted) throw dbError ?? new Error("Could not save the recording.");
-      uploadId = inserted.id;
-
-      await supabase.from("processing_steps").insert({
-        upload_id: uploadId,
-        user_id: user.id,
-        step: "upload",
-        status: "processing",
-        attempts: 1,
-        started_at: new Date().toISOString(),
+      // Short files go up as they are. Long ones are converted and split in the
+      // browser, uploaded part by part, then transcribed on the server, which
+      // keeps going even if this tab is closed.
+      await uploadRecording({
+        file,
+        metadata,
+        userId: user.id,
+        durationSec,
+        signal: controller.signal,
+        onPhase: setPhase,
+        onCreated: () => {
+          fetchUploads();
+          refetchSteps();
+        },
+        onStartError: (message) => toast.error(message),
       });
-      await fetchUploads();
-      refetchSteps();
-
-      // 2. Upload the file itself.
-      const { error: storageError } = await supabase.storage
-        .from("audio-uploads")
-        .upload(filePath, file, { contentType: file.type });
-      if (storageError) throw storageError;
-
-      await supabase
-        .from("processing_steps")
-        .update({ status: "done", error_message: null })
-        .eq("upload_id", uploadId)
-        .eq("step", "upload");
-
-      toast.success(`"${file.name}" uploaded — transcription starting…`);
-
-      // 3. Transcription starts now. Everything after it (cleaning,
-      //    translation, summary) runs on the server and is tracked step by
-      //    step, so closing this tab no longer leaves a recording half-done.
-      void startTranscription(uploadId);
+      toast.success(`"${file.name}" uploaded — transcription is starting.`);
     } catch (err) {
-      console.error("Upload error:", err);
-      const reason = friendlyUploadError(err);
-      if (uploadId) {
-        await supabase
-          .from("processing_steps")
-          .update({ status: "failed", error_message: reason })
-          .eq("upload_id", uploadId)
-          .eq("step", "upload");
-        await supabase.from("audio_uploads").update({ status: "failed" }).eq("id", uploadId);
-        fetchUploads();
-        refetchSteps();
+      if (err instanceof UploadError && err.code === "cancelled") {
+        toast.info("Upload cancelled.");
+      } else {
+        console.error("Upload error:", err);
+        toast.error(err instanceof Error && err.message ? err.message : friendlyUploadError(err));
       }
-      toast.error(reason);
     } finally {
+      abortRef.current = null;
+      setPhase(null);
       setIsUploading(false);
+      fetchUploads();
+      refetchSteps();
+      refetchProfile?.();
     }
   };
 
-  const startTranscription = async (uploadId: string) => {
-    const { error } = await supabase.functions.invoke("transcribe-audio", { body: { upload_id: uploadId } });
-    if (error) {
-      console.error("Transcription function error:", error);
-      toast.error((await readFunctionError(error)) ?? "Transcription could not start. Use Retry on the recording.");
-    }
-    fetchUploads();
-    refetchProfile?.();
-  };
+  const handleCancelUpload = () => abortRef.current?.abort();
 
   const handleDelete = async (id: string) => {
     const upload = uploads.find((u) => u.id === id);
-    if (!upload) return;
+    if (!upload || !user) return;
 
     try {
-      await supabase.storage.from("audio-uploads").remove([upload.file_path]);
+      // A recording can have several files: the original, or the playable copy plus its parts.
+      const paths = new Set([upload.file_path]);
+      const { data: files } = await supabase.storage.from("audio-uploads").list(`${user.id}/${id}`);
+      for (const file of files ?? []) paths.add(`${user.id}/${id}/${file.name}`);
+      await supabase.storage.from("audio-uploads").remove([...paths]);
+
       const { error } = await supabase.from("audio_uploads").delete().eq("id", id);
       if (error) throw error;
 
       toast.success("Recording deleted");
       setUploads((prev) => prev.filter((u) => u.id !== id));
-    } catch (err: any) {
-      toast.error(err.message || "Failed to delete");
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to delete");
     }
   };
 
@@ -235,16 +187,18 @@ const Dashboard = () => {
           </h2>
         )}
 
-        <div className="mb-6">
-          <UsageBar minutesUsed={minutesUsed} minutesLimit={minutesLimit} plan={plan} />
-        </div>
+        {!unlimited && (
+          <div className="mb-6">
+            <UsageBar minutesUsed={minutesUsed} minutesLimit={minutesLimit} plan={plan} />
+          </div>
+        )}
 
         <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatsCard
             icon={Clock}
             label="Minutes Remaining"
-            value={`${minutesRemaining}`}
-            subtext={`of ${minutesLimit} min`}
+            value={unlimited ? "Unlimited" : `${minutesRemaining}`}
+            subtext={unlimited ? "admin account" : `of ${minutesLimit} min`}
             highlight={!hasCredits ? "danger" : isLowCredits ? "warning" : undefined}
           />
           <StatsCard icon={FileAudio} label="Files Uploaded" value={`${uploads.length}`} />
@@ -279,6 +233,8 @@ const Dashboard = () => {
           <AudioUploader
             onFileSelected={handleFileSelected}
             isUploading={isUploading}
+            progress={phase}
+            onCancel={handleCancelUpload}
             disabled={!hasCredits || isTranscribing}
           />
           {isTranscribing && (

@@ -30,3 +30,6 @@ supabase/.branches/
 *.njsproj
 *.sln
 *.sw?
+
+# ffmpeg.wasm core, copied from node_modules by scripts/copy-ffmpeg-core.mjs
+public/ffmpeg/

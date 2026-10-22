@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { groqFetch } from "../_shared/groq.ts";
 import { claimStep, finishStep } from "../_shared/steps.ts";
+import { toSegment, type WhisperSegment } from "../_shared/transcript.ts";
 
 // Available in the Supabase Edge runtime: keeps the function alive for work
 // that continues after the response has been sent.
@@ -243,13 +244,8 @@ serve(async (req) => {
     const somaliText = whisperResult.text || "";
     const duration = whisperResult.duration || null;
 
-    // Extract segment timestamps
-    const segments = (whisperResult.segments || []).map((s: { id: number; start: number; end: number; text?: string }) => ({
-      id: s.id,
-      start: Math.round(s.start * 10) / 10,
-      end: Math.round(s.end * 10) / 10,
-      text: (s.text || "").trim(),
-    }));
+    // Segment timestamps, plus the confidence measures the transcript workspace uses.
+    const segments = ((whisperResult.segments || []) as WhisperSegment[]).map((seg, i) => toSegment(seg, i));
 
     // Save transcription. Upsert: a retried recording updates its single
     // transcript instead of creating a second one.
@@ -283,16 +279,15 @@ serve(async (req) => {
       .update({ status: "completed", duration_seconds: duration })
       .eq("id", upload_id);
 
-    // Charge the minutes exactly once per recording (skipped for admins). The
-    // database function is idempotent, so retries can never double-charge.
+    // Charge the minutes exactly once per recording. The database function is
+    // idempotent, so retries can never double-charge. Admins are recorded too
+    // (so their usage is visible); they are just never blocked by the limit.
     const durationMinutes = duration ? Math.ceil(duration / 60) : 1;
-    if (!isAdmin) {
-      const { error: chargeErr } = await adminClient.rpc("charge_upload_minutes", {
-        p_upload: upload_id,
-        p_minutes: durationMinutes,
-      });
-      if (chargeErr) console.error("charge_upload_minutes failed:", chargeErr);
-    }
+    const { error: chargeErr } = await adminClient.rpc("charge_upload_minutes", {
+      p_upload: upload_id,
+      p_minutes: durationMinutes,
+    });
+    if (chargeErr) console.error("charge_upload_minutes failed:", chargeErr);
 
     await finishStep(adminClient, upload_id, "transcription", true);
     owned = null;

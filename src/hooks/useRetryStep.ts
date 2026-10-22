@@ -26,10 +26,17 @@ export const useRetryStep = (onSettled?: () => void) => {
 
       setRunning((prev) => new Set(prev).add(id));
       try {
-        const { error } =
-          step === "transcription"
-            ? await supabase.functions.invoke("transcribe-audio", { body: { upload_id: uploadId } })
-            : await supabase.functions.invoke("run-pipeline", { body: { upload_id: uploadId, step } });
+        let error: unknown;
+        if (step === "transcription") {
+          // A long recording keeps its uploaded parts, so retrying carries on from the
+          // first part that isn't finished. A single-file recording is retried the older way.
+          const { data: hasParts } = await supabase.rpc("restart_transcription", { p_upload: uploadId });
+          ({ error } = hasParts
+            ? await supabase.functions.invoke("process-chunks", { body: { upload_id: uploadId } })
+            : await supabase.functions.invoke("transcribe-audio", { body: { upload_id: uploadId } }));
+        } else {
+          ({ error } = await supabase.functions.invoke("run-pipeline", { body: { upload_id: uploadId, step } }));
+        }
         if (error) {
           toast.error((await readFunctionError(error)) ?? "Could not retry. Please try again in a moment.");
         }

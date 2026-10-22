@@ -11,6 +11,9 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { GROQ_CHAT_URL as GROQ_URL, TEXT_MODEL as MODEL, groqFetch, reasoningParams } from "../_shared/groq.ts";
 import { trackStep } from "../_shared/steps.ts";
 
+// Longest transcript cleaned in a single request (about 2,000 tokens in, 2,000 out).
+const MAX_AUTO_CHARS = 6000;
+
 const handler = async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -93,6 +96,18 @@ const handler = async (req: Request): Promise<Response> => {
           cached: true,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // The AI service allows about 8,000 tokens a minute, which is not enough to
+    // clean a long recording in one go. Skip it, and say so.
+    if (transcription.somali_text.length > MAX_AUTO_CHARS) {
+      return new Response(
+        JSON.stringify({
+          error: "too_long",
+          message: "Skipped: this recording is too long to clean automatically with the free AI limits.",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

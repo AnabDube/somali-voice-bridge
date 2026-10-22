@@ -6,7 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { MAX_AUDIO_FILE_MB, extensionForMime, pickRecorderMimeType, validateAudioFile } from "@/lib/audio";
+import UploadProgress from "@/components/UploadProgress";
+import type { UploadPhase } from "@/lib/uploadRecording";
+import { MAX_AUDIO_FILE_MB, MAX_AUDIO_MINUTES, extensionForMime, pickRecorderMimeType, validateAudioFile } from "@/lib/audio";
 
 // The two main Somali language branches.
 export type SomaliDialect = "maxaatiri" | "af_maay";
@@ -52,10 +54,13 @@ const AGE_OPTIONS: { value: SpeakerAgeRange; label: string }[] = [
 interface AudioUploaderProps {
   onFileSelected: (file: File, metadata: UploadMetadata) => void;
   isUploading?: boolean;
+  /** What the upload is doing right now, for the progress display. */
+  progress?: UploadPhase | null;
+  onCancel?: () => void;
   disabled?: boolean;
 }
 
-const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderProps) => {
+const AudioUploader = ({ onFileSelected, isUploading, progress, onCancel, disabled }: AudioUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -252,9 +257,7 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
               exit={{ scale: 0.9, opacity: 0 }}
               className="flex flex-col items-center gap-4"
             >
-              <Loader2 className="h-12 w-12 animate-spin text-primary" />
-              <p className="font-display text-lg font-semibold">Uploading audio...</p>
-              <p className="text-sm text-muted-foreground">Please wait while your file is being saved</p>
+              <UploadProgress phase={progress ?? null} onCancel={onCancel} />
             </motion.div>
           ) : isRecording ? (
             <motion.div
@@ -289,14 +292,14 @@ const AudioUploader = ({ onFileSelected, isUploading, disabled }: AudioUploaderP
               <div className="text-center">
                 <p className="font-display text-lg font-semibold">Upload Somali Audio</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Drag & drop MP3, WAV, or M4A files here (max {MAX_AUDIO_FILE_MB}MB)
+                  Drag & drop an audio file here. MP3, WAV, M4A, OGG/OPUS, AAC, MP4 or WebM, up to {MAX_AUDIO_MINUTES} minutes ({MAX_AUDIO_FILE_MB}MB)
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <Button variant="outline" className="gap-2" asChild>
                   <label className="cursor-pointer">
                     <Upload className="h-4 w-4" /> Browse Files
-                    <input type="file" accept=".mp3,.wav,.m4a,.webm,audio/*" className="hidden" onChange={handleFileInput} />
+                    <input type="file" accept=".mp3,.wav,.m4a,.webm,.ogg,.opus,.mp4,.aac,.flac,audio/*" className="hidden" onChange={handleFileInput} />
                   </label>
                 </Button>
                 <Button onClick={startRecording} className="gap-2 bg-gradient-gold text-primary-foreground hover:opacity-90">

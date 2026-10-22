@@ -134,7 +134,19 @@ export const trackStep = async (
   }
 
   if (response.ok) {
-    await finishStep(admin, uploadId, spec.step, true);
+    const body = await response.clone().json().catch(() => null);
+    if (body?.partial === true) {
+      // Part of a long job is done and the rest needs another call: keep the
+      // step in the queue (still shown as in progress) with what is saved so far.
+      const { error: requeueError } = await admin.rpc("requeue_step", {
+        p_upload: uploadId,
+        p_step: spec.step,
+        p_progress: typeof body.progress === "string" ? body.progress : null,
+      });
+      if (requeueError) console.error(`requeue_step(${spec.step}) failed:`, requeueError);
+    } else {
+      await finishStep(admin, uploadId, spec.step, true);
+    }
   } else {
     const body = await response.clone().json().catch(() => null);
     await finishStep(admin, uploadId, spec.step, false, plainStepError(spec.step, response.status, body));

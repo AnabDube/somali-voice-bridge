@@ -1,17 +1,37 @@
-// Groq's Whisper endpoint rejects larger files (25MB on the free tier). If the
-// account is upgraded to a tier with a higher limit, raise this constant.
-export const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
+// Limits for what a user can pick. Long recordings are converted and split in the
+// browser (see lib/audioPrep.ts), so the size limit is for the file they choose,
+// not what is sent to the server.
+export const MAX_AUDIO_FILE_BYTES = 500 * 1024 * 1024;
 export const MAX_AUDIO_FILE_MB = MAX_AUDIO_FILE_BYTES / (1024 * 1024);
+export const MAX_AUDIO_MINUTES = 120;
+export const MAX_AUDIO_SECONDS = MAX_AUDIO_MINUTES * 60;
+
+// Short, small files in a format the transcription service accepts are sent
+// as they are. Anything else is converted first. (Groq accepts files up to 25MB.)
+export const DIRECT_MAX_BYTES = 20 * 1024 * 1024;
+export const DIRECT_MAX_SECONDS = 10 * 60;
+const DIRECT_EXTENSIONS = /\.(mp3|wav|m4a|webm|ogg|opus|mp4|flac|mpeg|mpga)$/i;
 
 const ACCEPTED_MIME_TYPES = [
   "audio/mpeg",
+  "audio/mp3",
   "audio/wav",
   "audio/x-wav",
+  "audio/wave",
   "audio/mp4",
   "audio/x-m4a",
+  "audio/m4a",
+  "audio/aac",
+  "audio/x-aac",
   "audio/webm",
+  "audio/ogg",
+  "audio/opus",
+  "audio/flac",
+  "audio/x-flac",
+  "video/mp4",
+  "video/webm",
 ];
-const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm)$/i;
+const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm|ogg|opus|mp4|aac|flac|mpeg|mpga)$/i;
 
 /** Returns a user-facing error message, or null if the file is acceptable. */
 export const validateAudioFile = (file: { name: string; size: number; type: string }): string | null => {
@@ -19,10 +39,46 @@ export const validateAudioFile = (file: { name: string; size: number; type: stri
     return `File too large. Maximum size is ${MAX_AUDIO_FILE_MB}MB.`;
   }
   if (!ACCEPTED_MIME_TYPES.includes(file.type) && !ACCEPTED_EXTENSIONS.test(file.name)) {
-    return "Unsupported format. Please upload MP3, WAV, M4A, or WebM.";
+    return "Unsupported format. Please upload MP3, WAV, M4A, OGG/OPUS, AAC, MP4 or WebM.";
   }
   return null;
 };
+
+/**
+ * Length of an audio file as the browser sees it, or 0 when it can't tell (some
+ * formats report no length, and some never finish loading).
+ */
+export const getAudioDuration = (file: Blob): Promise<number> =>
+  new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const audio = new Audio();
+    let finished = false;
+    const finish = (seconds: number) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      audio.removeAttribute("src");
+      resolve(Number.isFinite(seconds) && seconds > 0 ? seconds : 0);
+    };
+    const timer = setTimeout(() => finish(0), 8000);
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => finish(audio.duration);
+    audio.onerror = () => finish(0);
+    audio.src = url;
+  });
+
+/**
+ * Whether a file has to be converted and split before upload. False for short,
+ * small files in a format the transcription service takes directly. An unknown
+ * length (the browser could not read it) always means converting, because the
+ * length is needed to split and to count minutes.
+ */
+export const needsPreparation = (file: { name: string; size: number }, durationSec: number): boolean =>
+  !DIRECT_EXTENSIONS.test(file.name) ||
+  file.size > DIRECT_MAX_BYTES ||
+  !(durationSec > 0) ||
+  durationSec > DIRECT_MAX_SECONDS;
 
 /** A reason a user can act on, from whatever the storage upload threw. */
 export const friendlyUploadError = (error: unknown): string => {
@@ -31,7 +87,7 @@ export const friendlyUploadError = (error: unknown): string => {
     return "File too large. Please upload a smaller recording.";
   }
   if (/mime type|not supported|unsupported/.test(message)) {
-    return "Unsupported format. Please upload an MP3, WAV, M4A, or WebM file.";
+    return "Unsupported format. Please upload MP3, WAV, M4A, OGG/OPUS, AAC, MP4 or WebM.";
   }
   if (/failed to fetch|network|load failed|timeout|timed out/.test(message)) {
     return "The upload was interrupted by a network problem. Please check your connection and try again.";

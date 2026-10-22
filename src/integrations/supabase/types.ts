@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      audio_chunks: {
+        Row: {
+          attempts: number
+          duration_seconds: number
+          error_message: string | null
+          file_path: string
+          idx: number
+          segments: Json | null
+          start_seconds: number
+          status: "pending" | "processing" | "done" | "failed"
+          text: string | null
+          updated_at: string
+          upload_id: string
+          user_id: string
+          whisper_seconds: number | null
+        }
+        Insert: {
+          attempts?: number
+          duration_seconds: number
+          error_message?: string | null
+          file_path: string
+          idx: number
+          segments?: Json | null
+          start_seconds: number
+          status?: "pending" | "processing" | "done" | "failed"
+          text?: string | null
+          updated_at?: string
+          upload_id: string
+          user_id: string
+          whisper_seconds?: number | null
+        }
+        Update: {
+          attempts?: number
+          duration_seconds?: number
+          error_message?: string | null
+          file_path?: string
+          idx?: number
+          segments?: Json | null
+          start_seconds?: number
+          status?: "pending" | "processing" | "done" | "failed"
+          text?: string | null
+          updated_at?: string
+          upload_id?: string
+          user_id?: string
+          whisper_seconds?: number | null
+        }
+        Relationships: []
+      }
       audio_uploads: {
         Row: {
           approved_for_training: boolean
@@ -23,6 +71,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes: number | null
+          chunk_lease_until: string | null
           id: string
           minutes_charged: boolean
           status: string
@@ -61,6 +110,7 @@ export type Database = {
         Row: {
           attempts: number
           error_message: string | null
+          progress: string | null
           started_at: string | null
           status: "pending" | "processing" | "done" | "failed"
           step: "upload" | "transcription" | "cleaning" | "translation" | "research" | "summary"
@@ -143,7 +193,9 @@ export type Database = {
           somali_text_cleaned: string | null
           speaker_segments: Json | null
           speaker_timestamps: Json | null
+          summary_notes: Json | null
           terminology: Json | null
+          translation_progress: Json | null
           updated_at: string
           upload_id: string
           user_id: string
@@ -244,6 +296,14 @@ export type Database = {
       increment_minutes_used: {
         Args: { p_minutes: number; p_user_id: string }
         Returns: undefined
+      }
+      register_chunks: {
+        Args: { p_chunks: Json; p_upload: string }
+        Returns: undefined
+      }
+      restart_transcription: {
+        Args: { p_upload: string }
+        Returns: boolean
       }
       reset_pipeline_steps: {
         Args: { p_upload: string }

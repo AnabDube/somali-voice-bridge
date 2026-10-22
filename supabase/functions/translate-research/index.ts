@@ -12,6 +12,9 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { GROQ_CHAT_URL as GROQ_URL, TEXT_MODEL as MODEL, groqFetch, reasoningParams } from "../_shared/groq.ts";
 import { trackStep } from "../_shared/steps.ts";
 
+// Longest transcript translated in a single request.
+const MAX_AUTO_CHARS = 6000;
+
 const handler = async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -91,6 +94,18 @@ const handler = async (req: Request): Promise<Response> => {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Too long for one request within the AI service's per-minute limit. The
+    // standard translation (done in batches) is still produced.
+    if (sourceText.length > MAX_AUTO_CHARS) {
+      return new Response(
+        JSON.stringify({
+          error: "too_long",
+          message: "Skipped: this recording is too long for a research translation with the free AI limits.",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const startTime = Date.now();

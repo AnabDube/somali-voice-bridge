@@ -227,6 +227,8 @@ const Transcript = () => {
         english_text_research: null,
         research_summary: null,
         terminology: null,
+        translation_progress: null,
+        summary_notes: null,
         processing_stage: null,
       } as any)
       .eq("id", transcription.id);
@@ -241,6 +243,8 @@ const Transcript = () => {
         english_text_research: null,
         research_summary: null,
         terminology: null,
+        translation_progress: null,
+        summary_notes: null,
         processing_stage: null,
       }));
       setIsEditing(false);

@@ -12,6 +12,14 @@ export default defineConfig({
     },
   },
   plugins: [react()],
+  // @ffmpeg/ffmpeg starts its own web worker via new URL(..., import.meta.url);
+  // pre-bundling would break that path, so leave these packages as they are.
+  optimizeDeps: {
+    exclude: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
+  },
+  worker: {
+    format: "es",
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.run-pipeline]
 verify_jwt = false
+
+[functions.process-chunks]
+verify_jwt = false

@@ -12,6 +12,8 @@ export interface StepRow {
   step: StepName;
   status: StepStatus;
   error_message: string | null;
+  /** For long jobs, e.g. "3 of 9 parts". */
+  progress?: string | null;
   attempts: number;
   updated_at: string;
 }
@@ -50,6 +52,9 @@ export interface DisplayStatus {
 }
 
 const isActive = (step?: StepRow) => step?.status === "processing" || step?.status === "pending";
+
+/** " (3 of 9 parts)" while a long job is running, otherwise nothing. */
+const withProgress = (step?: StepRow) => (step?.progress ? ` (${step.progress})` : "");
 
 /** For recordings with no step rows (only the older audio_uploads.status). */
 const fromLegacyStatus = (status: string): DisplayStatus => {
@@ -95,7 +100,14 @@ export const deriveDisplayStatus = (legacyStatus: string, steps: StepMap): Displ
     };
   }
   if (!transcription || transcription.status !== "done") {
-    return { label: "Transcribing…", tone: "working", detail: null, busy: true, transcriptReady: false, failedStep: null };
+    return {
+      label: `Transcribing…${withProgress(transcription)}`,
+      tone: "working",
+      detail: null,
+      busy: true,
+      transcriptReady: false,
+      failedStep: null,
+    };
   }
 
   // The Somali transcript is ready. Translation and summary are enhancements:
@@ -103,7 +115,7 @@ export const deriveDisplayStatus = (legacyStatus: string, steps: StepMap): Displ
   const ready = { transcriptReady: true } as const;
 
   if (isActive(translation)) {
-    return { ...ready, label: "Transcript ready, translating…", tone: "working", detail: null, busy: true, failedStep: null };
+    return { ...ready, label: `Transcript ready, translating…${withProgress(translation)}`, tone: "working", detail: null, busy: true, failedStep: null };
   }
   if (isActive(cleaning) || isActive(research)) {
     return { ...ready, label: "Transcript ready, finishing up…", tone: "working", detail: null, busy: true, failedStep: null };
@@ -121,7 +133,7 @@ export const deriveDisplayStatus = (legacyStatus: string, steps: StepMap): Displ
     };
   }
   if (isActive(summary)) {
-    return { ...ready, label: "Transcript ready, summarising…", tone: "working", detail: null, busy: true, failedStep: null };
+    return { ...ready, label: `Transcript ready, summarising…${withProgress(summary)}`, tone: "working", detail: null, busy: true, failedStep: null };
   }
   if (summary?.status === "failed") {
     return {

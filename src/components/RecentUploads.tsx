@@ -87,7 +87,7 @@ const RecentUploads = ({ uploads, steps = {}, onDelete, onRetry, isRetrying }: R
                 Upload or record Somali audio
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Use the uploader above. Keep clips under 25 MB for best results.
+                Use the uploader above. Recordings up to 120 minutes work, and long ones are split up automatically.
               </p>
             </div>
           </li>
