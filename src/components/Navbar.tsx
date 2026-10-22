@@ -5,12 +5,14 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, signOut } = useAuth();
   const { profile } = useProfile();
+  const isAdmin = useIsAdmin();
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -22,6 +24,7 @@ const Navbar = () => {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/history", label: "History" },
     { to: "/pricing", label: "Pricing" },
+    ...(isAdmin ? [{ to: "/admin", label: "Admin" }] : []),
   ];
 
   return (

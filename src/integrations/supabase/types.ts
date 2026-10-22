@@ -214,7 +214,7 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
-      somali_dialect: "standard" | "af_maay" | "northern" | "benaadir" | "other"
+      somali_dialect: "standard" | "af_maay" | "northern" | "benaadir" | "other" | "maxaatiri"
       subscription_plan: "free" | "starter" | "professional" | "business"
     }
     CompositeTypes: {
@@ -344,7 +344,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "moderator", "user"],
-      somali_dialect: ["standard", "af_maay", "northern", "benaadir", "other"],
+      somali_dialect: ["standard", "af_maay", "northern", "benaadir", "other", "maxaatiri"],
       subscription_plan: ["free", "starter", "professional", "business"],
     },
   },
