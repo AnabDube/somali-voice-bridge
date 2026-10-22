@@ -24,6 +24,24 @@ export const validateAudioFile = (file: { name: string; size: number; type: stri
   return null;
 };
 
+/** A reason a user can act on, from whatever the storage upload threw. */
+export const friendlyUploadError = (error: unknown): string => {
+  const message = String((error as { message?: string } | null)?.message ?? error ?? "").toLowerCase();
+  if (/exceeded the maximum allowed size|payload too large|too large|413/.test(message)) {
+    return "File too large. Please upload a smaller recording.";
+  }
+  if (/mime type|not supported|unsupported/.test(message)) {
+    return "Unsupported format. Please upload an MP3, WAV, M4A, or WebM file.";
+  }
+  if (/failed to fetch|network|load failed|timeout|timed out/.test(message)) {
+    return "The upload was interrupted by a network problem. Please check your connection and try again.";
+  }
+  if (/row-level security|unauthorized|jwt|not authenticated/.test(message)) {
+    return "Your session expired. Please sign in again and retry.";
+  }
+  return "The upload failed. Please try again.";
+};
+
 /**
  * Pick a MediaRecorder container the current browser can actually produce.
  * Chrome/Firefox record WebM; Safari records MP4.

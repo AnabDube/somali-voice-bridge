@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.98.0";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { GROQ_CHAT_URL, TEXT_MODEL, groqFetch, reasoningParams } from "../_shared/groq.ts";
+import { trackStep } from "../_shared/steps.ts";
 
-serve(async (req) => {
+const handler = async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -86,20 +88,25 @@ serve(async (req) => {
     const startTime = Date.now();
 
     // Call Groq for translation (OpenAI-compatible chat completions)
-    const aiResp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const aiResp = await groqFetch(GROQ_CHAT_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: TEXT_MODEL,
+        ...reasoningParams,
         temperature: 0.2,
         messages: [
           {
             role: "system",
             content:
-              "You are a professional Somali-to-English translator. Translate the given Somali text into clear, natural English. Preserve the original meaning, tone, and structure. Output ONLY the English translation, nothing else — no preamble, no explanations, no quotes.",
+              "You are a professional Somali-to-English translator. The input is automatic speech-recognition output of spoken Somali, so it may contain mis-heard words, repetition, and fragments. " +
+              "Translate it into clear, natural English as faithfully as you can, preserving the original meaning, tone, and structure. " +
+              "When a passage is unintelligible, translate what is recoverable and write [unclear] for the rest. " +
+              "NEVER refuse, apologize, or comment on the quality of the text. " +
+              "Output ONLY the English translation, nothing else — no preamble, no explanations, no quotes.",
           },
           {
             role: "user",
@@ -113,7 +120,7 @@ serve(async (req) => {
 
     if (!aiResp.ok) {
       const errText = await aiResp.text();
-      console.error("Lovable AI error:", aiResp.status, errText);
+      console.error("Groq translation error:", aiResp.status, errText);
 
       if (aiResp.status === 429) {
         return new Response(
@@ -172,4 +179,6 @@ serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
-});
+};
+
+serve((req) => trackStep(req, { step: "translation", isDone: (t) => !!t.english_text }, handler));

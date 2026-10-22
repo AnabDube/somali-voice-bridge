@@ -10,10 +10,10 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 // Prefers the research translation if available, otherwise the standard
 // translation. Writes to `research_summary` and `terminology`.
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+import { GROQ_CHAT_URL as GROQ_URL, TEXT_MODEL as MODEL, groqFetch, reasoningParams } from "../_shared/groq.ts";
+import { trackStep } from "../_shared/steps.ts";
 
-serve(async (req) => {
+const handler = async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -80,8 +80,9 @@ serve(async (req) => {
       });
     }
 
-    // Idempotent
-    if (transcription.research_summary && transcription.terminology) {
+    // Idempotent. The terminology glossary is a bonus: if only that part failed
+    // before, don't regenerate the whole summary every time.
+    if (transcription.research_summary) {
       return new Response(
         JSON.stringify({
           success: true,
@@ -132,7 +133,7 @@ serve(async (req) => {
 
     // Run summary + terminology in parallel — they don't depend on each other.
     const [summaryResp, terminologyResp] = await Promise.all([
-      fetch(GROQ_URL, {
+      groqFetch(GROQ_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${GROQ_API_KEY}`,
@@ -140,6 +141,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: MODEL,
+          ...reasoningParams,
           temperature: 0.3,
           response_format: { type: "json_object" },
           messages: [
@@ -148,7 +150,7 @@ serve(async (req) => {
           ],
         }),
       }),
-      fetch(GROQ_URL, {
+      groqFetch(GROQ_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${GROQ_API_KEY}`,
@@ -156,6 +158,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: MODEL,
+          ...reasoningParams,
           temperature: 0.2,
           response_format: { type: "json_object" },
           messages: [
@@ -236,4 +239,6 @@ serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
-});
+};
+
+serve((req) => trackStep(req, { step: "summary", isDone: (t) => !!t.research_summary }, handler));

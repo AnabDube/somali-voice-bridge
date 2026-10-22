@@ -9,7 +9,12 @@ import UsageBar from "@/components/UsageBar";
 import { Button } from "@/components/ui/button";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProcessingSteps } from "@/hooks/useProcessingSteps";
+import { useRetryStep } from "@/hooks/useRetryStep";
 import { supabase } from "@/integrations/supabase/client";
+import { deriveDisplayStatus } from "@/lib/pipeline";
+import { friendlyUploadError } from "@/lib/audio";
+import { readFunctionError } from "@/lib/functionErrors";
 import { toast } from "sonner";
 
 const planLabels: Record<string, string> = {
@@ -53,18 +58,29 @@ const Dashboard = () => {
     fetchUploads();
   }, [fetchUploads]);
 
-  // Poll for status updates when any upload is processing
+  // Live per-step status for every recording in the list. Updates arrive on
+  // their own (no refresh needed) and drive the badges below.
+  const { steps, refetch: refetchSteps } = useProcessingSteps(uploads.map((u) => u.id));
+  const { retry, isRetrying } = useRetryStep(() => {
+    fetchUploads();
+    refetchProfile?.();
+  });
+
+  // When a transcription finishes or fails, refresh the list (duration) and
+  // the minutes balance.
+  const transcriptionStates = uploads.map((u) => steps[u.id]?.transcription?.status ?? "-").join(",");
   useEffect(() => {
-    const hasProcessing = uploads.some((u) => u.status === "processing");
-    if (!hasProcessing) return;
+    fetchUploads();
+    refetchProfile?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcriptionStates]);
 
-    const interval = setInterval(() => {
-      fetchUploads();
-      refetchProfile?.();
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [uploads, fetchUploads, refetchProfile]);
+  // The server allows one transcription at a time per user, so hold off new
+  // uploads until the current one has its transcript.
+  const isTranscribing = uploads.some((u) => {
+    const display = deriveDisplayStatus(u.status, steps[u.id] ?? {});
+    return display.busy && !display.transcriptReady;
+  });
 
   const minutesUsed = profile?.minutes_used ?? 0;
   const minutesLimit = profile?.minutes_limit ?? 30;
@@ -109,21 +125,19 @@ const Dashboard = () => {
 
     setIsUploading(true);
     const filePath = `${user.id}/${Date.now()}-${file.name}`;
+    let uploadId: string | null = null;
 
     try {
-      const { error: storageError } = await supabase.storage
-        .from("audio-uploads")
-        .upload(filePath, file, { contentType: file.type });
-
-      if (storageError) throw storageError;
-
-      const { data: insertData, error: dbError } = await supabase
+      // 1. Record the recording first, so even a failed upload is visible in
+      //    the list with the reason, instead of vanishing.
+      const { data: inserted, error: dbError } = await supabase
         .from("audio_uploads")
         .insert({
           user_id: user.id,
           file_name: file.name,
           file_path: filePath,
           file_size_bytes: file.size,
+          duration_seconds: durationSec > 0 ? durationSec : null,
           dialect: metadata.dialect,
           audio_quality: metadata.audio_quality,
           speaker_gender: metadata.speaker_gender,
@@ -134,79 +148,65 @@ const Dashboard = () => {
         .select("id")
         .single();
 
-      if (dbError) throw dbError;
+      if (dbError || !inserted) throw dbError ?? new Error("Could not save the recording.");
+      uploadId = inserted.id;
+
+      await supabase.from("processing_steps").insert({
+        upload_id: uploadId,
+        user_id: user.id,
+        step: "upload",
+        status: "processing",
+        attempts: 1,
+        started_at: new Date().toISOString(),
+      });
+      await fetchUploads();
+      refetchSteps();
+
+      // 2. Upload the file itself.
+      const { error: storageError } = await supabase.storage
+        .from("audio-uploads")
+        .upload(filePath, file, { contentType: file.type });
+      if (storageError) throw storageError;
+
+      await supabase
+        .from("processing_steps")
+        .update({ status: "done", error_message: null })
+        .eq("upload_id", uploadId)
+        .eq("step", "upload");
 
       toast.success(`"${file.name}" uploaded — transcription starting…`);
-      await fetchUploads();
 
-      if (insertData?.id) {
-        setUploads((prev) =>
-          prev.map((u) => (u.id === insertData.id ? { ...u, status: "processing" } : u))
-        );
-
-        const { data: fnData, error: fnErr } = await supabase.functions
-          .invoke("transcribe-audio", {
-            body: { upload_id: insertData.id },
-          });
-
-        if (fnErr) {
-          console.error("Transcription function error:", fnErr);
-          let errorMessage = "Transcription failed. Please try again.";
-          try {
-            const parsed = typeof fnErr === "object" ? fnErr : JSON.parse(String(fnErr));
-            if (parsed?.context?.body) {
-              const body = JSON.parse(parsed.context.body);
-              if (body.error === "no_credits") {
-                errorMessage = body.message;
-              } else if (body.message) {
-                errorMessage = body.message;
-              }
-            }
-          } catch {}
-          toast.error(errorMessage);
-          fetchUploads();
-          refetchProfile?.();
-          return;
-        }
-
-        if (fnData?.transcription_id) {
-          // Fire the AI pipeline in the background — don't block the upload
-          // spinner on Groq latency. The Transcript page polls for results.
-          const transcriptionId = fnData.transcription_id;
-          void (async () => {
-            const [translateResult, , researchResult] = await Promise.allSettled([
-              supabase.functions.invoke("translate-text", {
-                body: { transcription_id: transcriptionId },
-              }),
-              supabase.functions.invoke("process-transcript", {
-                body: { transcription_id: transcriptionId },
-              }),
-              supabase.functions.invoke("translate-research", {
-                body: { transcription_id: transcriptionId },
-              }),
-            ]);
-
-            const translationSucceeded =
-              (translateResult.status === "fulfilled" && !translateResult.value.error) ||
-              (researchResult.status === "fulfilled" && !researchResult.value.error);
-            if (translationSucceeded) {
-              await supabase.functions.invoke("generate-summary", {
-                body: { transcription_id: transcriptionId },
-              });
-            }
-            refetchProfile?.();
-          })();
-        }
-
-        fetchUploads();
-        refetchProfile?.();
-      }
-    } catch (err: any) {
+      // 3. Transcription starts now. Everything after it (cleaning,
+      //    translation, summary) runs on the server and is tracked step by
+      //    step, so closing this tab no longer leaves a recording half-done.
+      void startTranscription(uploadId);
+    } catch (err) {
       console.error("Upload error:", err);
-      toast.error(err.message || "Upload failed. Please try again.");
+      const reason = friendlyUploadError(err);
+      if (uploadId) {
+        await supabase
+          .from("processing_steps")
+          .update({ status: "failed", error_message: reason })
+          .eq("upload_id", uploadId)
+          .eq("step", "upload");
+        await supabase.from("audio_uploads").update({ status: "failed" }).eq("id", uploadId);
+        fetchUploads();
+        refetchSteps();
+      }
+      toast.error(reason);
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const startTranscription = async (uploadId: string) => {
+    const { error } = await supabase.functions.invoke("transcribe-audio", { body: { upload_id: uploadId } });
+    if (error) {
+      console.error("Transcription function error:", error);
+      toast.error((await readFunctionError(error)) ?? "Transcription could not start. Use Retry on the recording.");
+    }
+    fetchUploads();
+    refetchProfile?.();
   };
 
   const handleDelete = async (id: string) => {
@@ -279,8 +279,13 @@ const Dashboard = () => {
           <AudioUploader
             onFileSelected={handleFileSelected}
             isUploading={isUploading}
-            disabled={!hasCredits}
+            disabled={!hasCredits || isTranscribing}
           />
+          {isTranscribing && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              A recording is being transcribed. You can upload the next one as soon as its transcript is ready.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center justify-between mb-2">
@@ -289,7 +294,13 @@ const Dashboard = () => {
             <Link to="/history"><History className="h-3.5 w-3.5" /> View All</Link>
           </Button>
         </div>
-        <RecentUploads uploads={uploads} onDelete={handleDelete} />
+        <RecentUploads
+          uploads={uploads}
+          steps={steps}
+          onDelete={handleDelete}
+          onRetry={retry}
+          isRetrying={isRetrying}
+        />
       </main>
     </div>
   );

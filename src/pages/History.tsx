@@ -1,23 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileAudio, Calendar, Clock, Eye, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { FileAudio, Calendar, Clock, Eye, ChevronLeft, ChevronRight, Search, Loader2, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import Navbar from "@/components/Navbar";
+import StatusBadge from "@/components/StatusBadge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProcessingSteps } from "@/hooks/useProcessingSteps";
+import { useRetryStep } from "@/hooks/useRetryStep";
+import { deriveDisplayStatus } from "@/lib/pipeline";
 import { format } from "date-fns";
 
 const PAGE_SIZE = 10;
-
-const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  uploaded: { label: "Uploaded", variant: "outline" },
-  processing: { label: "Processing", variant: "secondary" },
-  completed: { label: "Ready", variant: "default" },
-  failed: { label: "Failed", variant: "destructive" },
-  pending: { label: "Uploaded", variant: "outline" },
-};
 
 const formatDuration = (seconds: number | null) => {
   if (!seconds) return "—";
@@ -34,8 +29,6 @@ interface UploadWithTranscription {
   duration_seconds: number | null;
   status: string;
   created_at: string;
-  hasTranscription: boolean;
-  hasTranslation: boolean;
 }
 
 const History = () => {
@@ -71,34 +64,21 @@ const History = () => {
     }
 
     setTotalCount(count ?? 0);
-
-    // Fetch transcription status for these uploads
-    const ids = data.map((u) => u.id);
-    const { data: transcriptions } = await supabase
-      .from("transcriptions")
-      .select("upload_id, somali_text, english_text")
-      .in("upload_id", ids);
-
-    const tMap = new Map(
-      (transcriptions ?? []).map((t) => [t.upload_id, t])
-    );
-
-    setUploads(
-      data.map((u) => {
-        const t = tMap.get(u.id);
-        return {
-          ...u,
-          hasTranscription: !!t?.somali_text,
-          hasTranslation: !!t?.english_text,
-        };
-      })
-    );
+    setUploads(data);
     setLoading(false);
   }, [user, page, search]);
 
   useEffect(() => {
     fetchUploads();
   }, [fetchUploads]);
+
+  // Same live step data (and the same derivation) as the dashboard and the
+  // transcript page, so a recording shows the same status everywhere.
+  const { steps, refetch: refetchSteps } = useProcessingSteps(uploads.map((u) => u.id));
+  const { retry, isRetrying } = useRetryStep(() => {
+    refetchSteps();
+    fetchUploads();
+  });
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
@@ -136,7 +116,8 @@ const History = () => {
           ) : (
             <div className="divide-y divide-border">
               {uploads.map((upload) => {
-                const cfg = statusConfig[upload.status] || statusConfig.pending;
+                const display = deriveDisplayStatus(upload.status, steps[upload.id] ?? {});
+                const retryingNow = !!display.failedStep && isRetrying(upload.id, display.failedStep);
                 return (
                   <div key={upload.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5 sm:flex-nowrap">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -154,16 +135,29 @@ const History = () => {
                           {formatDuration(upload.duration_seconds)}
                         </span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={cfg.variant}>{cfg.label}</Badge>
-                      {upload.hasTranscription && (
-                        <Badge variant="secondary">Transcribed</Badge>
-                      )}
-                      {upload.hasTranslation && (
-                        <Badge variant="default">Translated</Badge>
+                      <div className="mt-1.5">
+                        <StatusBadge status={display} />
+                      </div>
+                      {display.detail && (
+                        <p className="mt-1 text-xs text-muted-foreground">{display.detail}</p>
                       )}
                     </div>
+                    {display.failedStep === "transcription" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 gap-1.5 text-xs"
+                        disabled={retryingNow}
+                        onClick={() => retry(upload.id, "transcription")}
+                      >
+                        {retryingNow ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RotateCw className="h-3.5 w-3.5" />
+                        )}
+                        Retry
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"

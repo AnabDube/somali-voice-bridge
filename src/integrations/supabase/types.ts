@@ -24,6 +24,7 @@ export type Database = {
           file_path: string
           file_size_bytes: number | null
           id: string
+          minutes_charged: boolean
           status: string
           updated_at: string
           user_id: string
@@ -52,6 +53,39 @@ export type Database = {
           id?: string
           status?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      processing_steps: {
+        Row: {
+          attempts: number
+          error_message: string | null
+          started_at: string | null
+          status: "pending" | "processing" | "done" | "failed"
+          step: "upload" | "transcription" | "cleaning" | "translation" | "research" | "summary"
+          updated_at: string
+          upload_id: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          error_message?: string | null
+          started_at?: string | null
+          status?: "pending" | "processing" | "done" | "failed"
+          step: "upload" | "transcription" | "cleaning" | "translation" | "research" | "summary"
+          updated_at?: string
+          upload_id: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          error_message?: string | null
+          started_at?: string | null
+          status?: "pending" | "processing" | "done" | "failed"
+          step?: "upload" | "transcription" | "cleaning" | "translation" | "research" | "summary"
+          updated_at?: string
+          upload_id?: string
           user_id?: string
         }
         Relationships: []
@@ -209,6 +243,10 @@ export type Database = {
       }
       increment_minutes_used: {
         Args: { p_minutes: number; p_user_id: string }
+        Returns: undefined
+      }
+      reset_pipeline_steps: {
+        Args: { p_upload: string }
         Returns: undefined
       }
     }

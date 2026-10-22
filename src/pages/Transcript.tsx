@@ -13,6 +13,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { useProcessingSteps } from "@/hooks/useProcessingSteps";
+import { useRetryStep } from "@/hooks/useRetryStep";
+import { deriveDisplayStatus, type StepName } from "@/lib/pipeline";
+import { readFunctionError } from "@/lib/functionErrors";
+import StatusBadge from "@/components/StatusBadge";
 import { toast } from "sonner";
 import ResearchSummaryPanel, { type ResearchSummary } from "@/components/ResearchSummaryPanel";
 
@@ -52,7 +57,6 @@ const Transcript = () => {
   const [transcription, setTranscription] = useState<any>(null);
   const [copiedSomali, setCopiedSomali] = useState(false);
   const [copiedEnglish, setCopiedEnglish] = useState(false);
-  const [translationFailed, setTranslationFailed] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -64,44 +68,42 @@ const Transcript = () => {
   const [showCleaned, setShowCleaned] = useState(true);
   const [showResearch, setShowResearch] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
   const rafRef = useRef<number>();
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = undefined;
-    }
-  }, []);
+  // Live status of every step for this recording. It updates by itself (no
+  // refresh), and the same data and derivation drive the dashboard badges, so
+  // the two pages can never disagree.
+  const { steps: allSteps, refetch: refetchSteps } = useProcessingSteps(uploadId ? [uploadId] : []);
+  const steps = (uploadId && allSteps[uploadId]) || {};
+  const display = deriveDisplayStatus(upload?.status ?? "uploaded", steps);
 
-  const startPolling = useCallback(() => {
-    stopPolling();
-    pollRef.current = setInterval(async () => {
-      const { data: t } = await supabase
-        .from("transcriptions")
-        .select("*")
-        .eq("upload_id", uploadId!)
-        .single();
-      if (t) {
-        setTranscription(t);
-        if (
-          t.english_text &&
-          t.somali_text_cleaned &&
-          t.english_text_research &&
-          t.research_summary
-        ) stopPolling();
-      }
-      const { data: uploadData } = await supabase
-        .from("audio_uploads")
-        .select("status")
-        .eq("id", uploadId!)
-        .single();
-      if (uploadData) {
-        setUpload((prev: any) => (prev ? { ...prev, status: uploadData.status } : prev));
-        if (uploadData.status === "failed") stopPolling();
-      }
-    }, 1500);
-  }, [uploadId, stopPolling]);
+  // Pull fresh data for the recording and its transcript.
+  const refreshData = useCallback(async () => {
+    if (!uploadId) return;
+    const [{ data: uploadRow }, { data: transcriptRow }] = await Promise.all([
+      supabase.from("audio_uploads").select("*").eq("id", uploadId).single(),
+      supabase.from("transcriptions").select("*").eq("upload_id", uploadId).maybeSingle(),
+    ]);
+    if (uploadRow) setUpload(uploadRow);
+    if (transcriptRow) setTranscription(transcriptRow);
+  }, [uploadId]);
+
+  const { retry, isRetrying } = useRetryStep(() => {
+    refreshData();
+    refetchSteps();
+  });
+  const retryStep = (step: StepName) => {
+    if (uploadId) retry(uploadId, step);
+  };
+
+  // Whenever a step changes, reload the transcript so new text appears.
+  const stepSignature = Object.values(steps)
+    .map((s) => `${s?.step}:${s?.status}:${s?.updated_at}`)
+    .join("|");
+  useEffect(() => {
+    if (!loading && !accessDenied) refreshData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepSignature]);
 
   // Parse segments from transcription
   const segments: Segment[] = (() => {
@@ -175,31 +177,9 @@ const Transcript = () => {
       if (t) setTranscription(t);
       setLoading(false);
 
-      if (
-        uploadData.status === "processing" ||
-        (t?.somali_text && !t?.english_text) ||
-        (t?.somali_text && !t?.somali_text_cleaned)
-      ) {
-        startPolling();
-      }
     };
     fetchData();
-    return () => stopPolling();
-  }, [uploadId, user, startPolling, stopPolling]);
-
-  const handleRetryTranslation = async () => {
-    if (!transcription?.id) return;
-    setTranslationFailed(false);
-    const { error } = await supabase.functions.invoke("translate-text", {
-      body: { transcription_id: transcription.id },
-    });
-    if (error) {
-      setTranslationFailed(true);
-      toast.error("Translation failed. Please try again.");
-    } else {
-      startPolling();
-    }
-  };
+  }, [uploadId, user]);
 
   const handleToggleVerified = async () => {
     if (!transcription?.id || !user) return;
@@ -265,29 +245,18 @@ const Transcript = () => {
       }));
       setIsEditing(false);
       toast.success("Transcript updated. Re-analysing…");
-      const transcriptionId = transcription.id;
-      const [translateResult] = await Promise.allSettled([
-        supabase.functions.invoke("translate-text", {
-          body: { transcription_id: transcriptionId },
-        }),
-        supabase.functions.invoke("process-transcript", {
-          body: { transcription_id: transcriptionId },
-        }),
-        supabase.functions.invoke("translate-research", {
-          body: { transcription_id: transcriptionId },
-        }),
-      ]);
-      const translateErr =
-        translateResult.status === "fulfilled" ? translateResult.value.error : translateResult.reason;
-      if (translateErr) {
-        setTranslationFailed(true);
-      } else {
-        setTranslationFailed(false);
-        startPolling();
-        void supabase.functions.invoke("generate-summary", {
-          body: { transcription_id: transcriptionId },
-        });
-      }
+
+      // The derived steps (cleaning, translation, summary) must run again on the
+      // new text: mark them pending, then let the server do the work. Progress
+      // shows up live, so there is nothing to wait for here.
+      await supabase.rpc("reset_pipeline_steps", { p_upload: uploadId! });
+      refetchSteps();
+      supabase.functions.invoke("run-pipeline", { body: { upload_id: uploadId } }).then(async ({ error: pipelineError }) => {
+        if (pipelineError) {
+          toast.error((await readFunctionError(pipelineError)) ?? "Could not start re-analysis. Use Retry on the step that failed.");
+        }
+        refetchSteps();
+      });
     }
     setIsSaving(false);
   };
@@ -385,19 +354,6 @@ const Transcript = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleRetrySummary = async () => {
-    if (!transcription?.id) return;
-    const { error } = await supabase.functions.invoke("generate-summary", {
-      body: { transcription_id: transcription.id },
-    });
-    if (error) {
-      toast.error("Could not generate summary. Please try again.");
-    } else {
-      toast.success("Generating summary…");
-      startPolling();
-    }
-  };
-
   if (accessDenied) {
     return (
       <div className="min-h-screen bg-background">
@@ -416,23 +372,34 @@ const Transcript = () => {
     );
   }
 
-  const isProcessing = upload?.status === "processing";
-  const isFailed = upload?.status === "failed";
+  // What is happening comes from the step rows, never guessed from which text
+  // columns happen to be empty. The Somali transcript is shown as soon as it
+  // exists; translation, cleaning and summary only add to it, and a failure in
+  // any of them never hides it.
+  const stepActive = (name: StepName) => steps[name]?.status === "pending" || steps[name]?.status === "processing";
+  const transcribing = display.busy && !display.transcriptReady;
+  const transcriptionFailed = display.tone === "failed" && !display.transcriptReady;
+
   const somaliRaw = transcription?.somali_text || "";
   const somaliCleaned = transcription?.somali_text_cleaned || "";
   const hasCleaned = !!somaliCleaned;
-  const isCleaning = !!somaliRaw && !hasCleaned && transcription?.processing_stage !== "failed";
+  const isCleaning = !!somaliRaw && !hasCleaned && stepActive("cleaning");
   const somaliText = hasCleaned && showCleaned ? somaliCleaned : somaliRaw;
   const englishStandard = transcription?.english_text || "";
   const englishResearch = transcription?.english_text_research || "";
   const hasResearch = !!englishResearch;
   const englishText = showResearch && hasResearch ? englishResearch : englishStandard;
   const hasEnglish = !!englishText;
-  const isTranslating = !!somaliRaw && !englishStandard && !translationFailed;
-  const isResearchTranslating = !!somaliRaw && !hasResearch && !translationFailed;
+  const isTranslating = !!somaliRaw && !englishStandard && stepActive("translation");
+  // No English and nothing running to produce it: it failed (or never ran).
+  const translationDidFail = !!somaliRaw && !englishStandard && !isTranslating;
+  const translationError =
+    steps.translation?.error_message ?? "Translation did not finish. You can retry it.";
+  const isResearchTranslating = !!somaliRaw && !hasResearch && stepActive("research");
   const researchSummary: ResearchSummary | null = transcription?.research_summary ?? null;
   const hasSummary = !!researchSummary && Object.keys(researchSummary).length > 0;
-  const isSummaryPending = !!englishStandard && !hasSummary;
+  const isSummaryPending = !hasSummary && stepActive("summary");
+  const summaryError = !hasSummary && steps.summary?.status === "failed" ? steps.summary.error_message : null;
   const dialectLabel = upload?.dialect ? DIALECT_LABELS[upload.dialect] || upload.dialect : null;
 
   return (
@@ -474,6 +441,7 @@ const Transcript = () => {
                       <ShieldCheck className="h-3 w-3" /> Verified for training
                     </Badge>
                   )}
+                  <StatusBadge status={display} />
                 </div>
                 <p className="text-sm text-muted-foreground">Transcript & Translation</p>
               </div>
@@ -519,22 +487,38 @@ const Transcript = () => {
               </div>
             )}
 
-            {isProcessing ? (
+            {transcribing ? (
               <div className="rounded-xl border border-border bg-card p-12 text-center shadow-card">
                 <Loader2 className="mx-auto h-10 w-10 animate-spin text-primary" />
-                <p className="mt-4 font-display text-lg font-semibold">Transcribing audio…</p>
+                <p className="mt-4 font-display text-lg font-semibold">{display.label}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This may take a minute depending on the file length.
+                  This may take a minute depending on the file length. You can leave this page — it keeps going
+                  and will be ready when you come back.
                 </p>
               </div>
-            ) : isFailed ? (
+            ) : transcriptionFailed ? (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
-                <p className="font-display text-lg font-semibold text-destructive">
-                  Transcription Failed
+                <AlertCircle className="mx-auto h-8 w-8 text-destructive" />
+                <p className="mt-3 font-display text-lg font-semibold text-destructive">
+                  {display.label}
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Something went wrong. Please try uploading the file again.
+                  {display.detail ?? "Something went wrong. Please retry."}
                 </p>
+                {display.failedStep === "transcription" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4 gap-1.5"
+                    disabled={!!uploadId && isRetrying(uploadId, "transcription")}
+                    onClick={() => retryStep("transcription")}
+                  >
+                    {uploadId && isRetrying(uploadId, "transcription") ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Retry transcription
+                  </Button>
+                )}
               </div>
             ) : (
               <>
@@ -569,11 +553,13 @@ const Transcript = () => {
                 {/* English Panel */}
                 <TranscriptPanelInline
                   title="English Translation"
-                  content={hasEnglish ? englishText : translationFailed ? "" : "Translating…"}
+                  content={hasEnglish ? englishText : translationDidFail ? "" : "Translating…"}
                   hasContent={hasEnglish}
                   isPending={isTranslating}
-                  isFailed={translationFailed}
-                  onRetry={handleRetryTranslation}
+                  isFailed={translationDidFail}
+                  errorMessage={translationError}
+                  onRetry={() => retryStep("translation")}
+                  isRetrying={!!uploadId && isRetrying(uploadId, "translation")}
                   copied={copiedEnglish}
                   onCopy={() => hasEnglish && handleCopy(englishText, "english")}
                   onDownloadTxt={hasEnglish ? () => downloadTxt(englishText, showResearch ? "translation-research" : "translation") : undefined}
@@ -590,8 +576,10 @@ const Transcript = () => {
                   <ResearchSummaryPanel
                     summary={researchSummary}
                     isPending={isSummaryPending}
+                    errorMessage={summaryError}
+                    isRetrying={!!uploadId && isRetrying(uploadId, "summary")}
                     onExportDoc={downloadSummaryDoc}
-                    onRetry={hasEnglish ? handleRetrySummary : undefined}
+                    onRetry={hasEnglish ? () => retryStep("summary") : undefined}
                   />
                 </div>
               )}
@@ -610,6 +598,8 @@ interface TranscriptPanelInlineProps {
   hasContent: boolean;
   isPending?: boolean;
   isFailed?: boolean;
+  errorMessage?: string | null;
+  isRetrying?: boolean;
   onRetry?: () => void;
   copied: boolean;
   onCopy: () => void;
@@ -643,6 +633,8 @@ const TranscriptPanelInline = ({
   hasContent,
   isPending,
   isFailed,
+  errorMessage,
+  isRetrying,
   onRetry,
   copied,
   onCopy,
@@ -755,9 +747,13 @@ const TranscriptPanelInline = ({
         <div className="flex flex-col items-center justify-center py-8 text-center">
           <AlertCircle className="h-6 w-6 text-destructive" />
           <p className="mt-3 text-sm font-medium text-destructive">Translation failed</p>
-          <p className="mt-1 text-xs text-muted-foreground">Something went wrong. Please try again.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {errorMessage ?? "Something went wrong. Please try again."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Your Somali transcript is not affected.</p>
           {onRetry && (
-            <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+            <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={onRetry} disabled={isRetrying}>
+              {isRetrying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Retry Translation
             </Button>
           )}

@@ -12,11 +12,14 @@ export interface ResearchSummary {
 interface Props {
   summary: ResearchSummary | null;
   isPending: boolean;
+  /** Why the summary failed, in plain English (shown with the retry button). */
+  errorMessage?: string | null;
+  isRetrying?: boolean;
   onExportDoc?: () => void;
   onRetry?: () => void;
 }
 
-const ResearchSummaryPanel = ({ summary, isPending, onExportDoc, onRetry }: Props) => {
+const ResearchSummaryPanel = ({ summary, isPending, errorMessage, isRetrying, onExportDoc, onRetry }: Props) => {
   const hasContent = !!summary && (
     !!summary.overview ||
     (summary.key_themes?.length ?? 0) > 0 ||
@@ -56,11 +59,15 @@ const ResearchSummaryPanel = ({ summary, isPending, onExportDoc, onRetry }: Prop
           </div>
         ) : !hasContent ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <AlertCircle className="h-6 w-6 text-muted-foreground/50" />
-            <p className="mt-3 text-sm text-muted-foreground">No summary available yet.</p>
+            <AlertCircle className={errorMessage ? "h-6 w-6 text-destructive" : "h-6 w-6 text-muted-foreground/50"} />
+            <p className="mt-3 text-sm text-muted-foreground">
+              {errorMessage ? "Summary failed" : "No summary available yet."}
+            </p>
+            {errorMessage && <p className="mt-1 text-xs text-muted-foreground">{errorMessage}</p>}
             {onRetry && (
-              <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
-                Generate Summary
+              <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={onRetry} disabled={isRetrying}>
+                {isRetrying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {errorMessage ? "Retry Summary" : "Generate Summary"}
               </Button>
             )}
           </div>

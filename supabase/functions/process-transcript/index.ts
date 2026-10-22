@@ -5,13 +5,13 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 // Cleans raw Whisper output: fixes mis-heard words, adds punctuation /
 // paragraph breaks, and detects speaker changes from timestamped segments.
 // Writes `somali_text_cleaned` and `speaker_segments`.
-// Currently uses Groq (llama-3.3-70b-versatile). Swap to Anthropic later
+// Uses Groq (model configured in _shared/groq.ts). Swap to Anthropic later
 // for higher-quality cleaning by replacing the two fetch calls below.
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+import { GROQ_CHAT_URL as GROQ_URL, TEXT_MODEL as MODEL, groqFetch, reasoningParams } from "../_shared/groq.ts";
+import { trackStep } from "../_shared/steps.ts";
 
-serve(async (req) => {
+const handler = async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -107,9 +107,10 @@ serve(async (req) => {
       "Your job: fix obvious mis-heard words, add natural punctuation and paragraph breaks, " +
       "and normalize spelling — while preserving the speaker's original meaning, tone, and any " +
       "dialectal choices. Do not translate. Do not summarize. Do not add commentary. " +
+      "If the text is hard to understand, still return your best cleaned version of it; never refuse or apologize. " +
       "Output ONLY the cleaned Somali text, nothing else — no preamble, no explanations, no quotes.";
 
-    const cleanResp = await fetch(GROQ_URL, {
+    const cleanResp = await groqFetch(GROQ_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${GROQ_API_KEY}`,
@@ -117,6 +118,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: MODEL,
+        ...reasoningParams,
         temperature: 0.2,
         messages: [
           { role: "system", content: cleanSystem },
@@ -172,7 +174,7 @@ serve(async (req) => {
         "Include one entry per input segment, in order. If you cannot distinguish speakers " +
         'with any confidence, label every segment "Speaker 1".';
 
-      const speakerResp = await fetch(GROQ_URL, {
+      const speakerResp = await groqFetch(GROQ_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${GROQ_API_KEY}`,
@@ -180,6 +182,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: MODEL,
+          ...reasoningParams,
           temperature: 0.1,
           response_format: { type: "json_object" },
           messages: [
@@ -243,4 +246,6 @@ serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
-});
+};
+
+serve((req) => trackStep(req, { step: "cleaning", isDone: (t) => !!t.somali_text_cleaned }, handler));

@@ -52,6 +52,16 @@ In the Supabase dashboard, under **Authentication → URL Configuration**, set t
 - Opt-in training-data pipeline: only recordings whose owner ticked the consent box **and** that an admin verified are exported (`export-training-data`)
 - Password reset, email verification, light/dark theme
 
+## Processing pipeline
+
+Each recording moves through tracked steps stored in `processing_steps`:
+upload → transcription → cleaning / translation / research translation → summary.
+
+- Each step has a status (`pending`, `processing`, `done`, `failed`), a plain-English `error_message`, an attempt count and a timestamp.
+- Everything after transcription runs on the server (`run-pipeline`), so closing the tab never leaves a recording half-done. A failure in translation or summary never hides the Somali transcript.
+- A pg_cron watchdog (`fail-stuck-steps`, every minute) marks stuck steps as failed so nothing hangs silently. Each failed step has its own Retry button; the server claims a step before working, so double-clicking Retry does nothing extra and minutes are charged only once per recording.
+- The dashboard, history and transcript pages all derive their status from the same step rows (`src/lib/pipeline.ts`), and update live over Supabase Realtime.
+
 ## Security model
 
 - Row-level security on every table; users can only read and write their own rows.

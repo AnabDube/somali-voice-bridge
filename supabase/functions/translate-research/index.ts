@@ -9,10 +9,10 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 //   • keeps paragraph structure and register close to the source
 // Writes to `english_text_research`. Prefers cleaned Somali if available.
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+import { GROQ_CHAT_URL as GROQ_URL, TEXT_MODEL as MODEL, groqFetch, reasoningParams } from "../_shared/groq.ts";
+import { trackStep } from "../_shared/steps.ts";
 
-serve(async (req) => {
+const handler = async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -105,9 +105,12 @@ serve(async (req) => {
       "3. When the source is ambiguous or could plausibly be translated multiple ways, give your best " +
       "English rendering and put the alternate reading in (parentheses) right after it.\n" +
       "4. Do NOT add commentary, disclaimers, or a preface. Output ONLY the annotated English translation.\n" +
-      "5. If there are no cultural nuances or ambiguities, translate plainly without adding any brackets.";
+      "5. If there are no cultural nuances or ambiguities, translate plainly without adding any brackets.\n" +
+      "6. The source is automatic speech-recognition output, so it may contain mis-heard words, repetition, " +
+      "and fragments. Translate what is recoverable, mark unintelligible passages as [unclear], and NEVER " +
+      "refuse, apologize, or comment on the quality of the text.";
 
-    const aiResp = await fetch(GROQ_URL, {
+    const aiResp = await groqFetch(GROQ_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${GROQ_API_KEY}`,
@@ -115,6 +118,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: MODEL,
+        ...reasoningParams,
         temperature: 0.2,
         messages: [
           { role: "system", content: systemPrompt },
@@ -176,4 +180,6 @@ serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
-});
+};
+
+serve((req) => trackStep(req, { step: "research", isDone: (t) => !!t.english_text_research }, handler));

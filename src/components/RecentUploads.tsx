@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { FileAudio, Calendar, Clock, Trash2, Eye, Loader2, Upload, FileText, Languages } from "lucide-react";
+import { FileAudio, Calendar, Clock, Trash2, Eye, Loader2, Upload, FileText, Languages, RotateCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import StatusBadge from "@/components/StatusBadge";
+import { deriveDisplayStatus, type StepMap, type StepName } from "@/lib/pipeline";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,16 +29,12 @@ interface AudioUpload {
 
 interface RecentUploadsProps {
   uploads: AudioUpload[];
+  /** Live processing steps per recording id. */
+  steps?: Record<string, StepMap>;
   onDelete?: (id: string) => Promise<void> | void;
+  onRetry?: (uploadId: string, step: StepName) => void;
+  isRetrying?: (uploadId: string, step: StepName) => boolean;
 }
-
-const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  uploaded: { label: "Uploaded", variant: "outline" },
-  processing: { label: "Processing", variant: "secondary" },
-  completed: { label: "Ready", variant: "default" },
-  failed: { label: "Failed", variant: "destructive" },
-  pending: { label: "Uploaded", variant: "outline" },
-};
 
 const formatDuration = (seconds: number | null) => {
   if (!seconds) return "—";
@@ -52,7 +49,7 @@ const formatFileSize = (bytes: number | null) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
+const RecentUploads = ({ uploads, steps = {}, onDelete, onRetry, isRetrying }: RecentUploadsProps) => {
   const navigate = useNavigate();
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -115,10 +112,10 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
             <div className="flex-1">
               <div className="flex items-center gap-1.5 text-sm font-medium">
                 <Languages className="h-3.5 w-3.5 text-muted-foreground" />
-                Translate to English
+                Read it in English
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                One click to get a natural English translation of the transcript.
+                A natural English translation and a summary appear automatically once the transcript is ready.
               </p>
             </div>
           </li>
@@ -134,8 +131,9 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
       </div>
       <div className="divide-y divide-border">
         {uploads.map((upload) => {
-          const cfg = statusConfig[upload.status] || statusConfig.pending;
+          const display = deriveDisplayStatus(upload.status, steps[upload.id] ?? {});
           const isDeleting = deletingId === upload.id;
+          const retryingNow = !!display.failedStep && !!isRetrying?.(upload.id, display.failedStep);
           return (
             <div key={upload.id} className="flex items-center gap-4 px-5 py-3.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -156,11 +154,14 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
                     <span>{formatFileSize(upload.file_size_bytes)}</span>
                   )}
                 </div>
+                <div className="mt-1.5">
+                  <StatusBadge status={display} />
+                </div>
+                {display.detail && (
+                  <p className="mt-1 text-xs text-muted-foreground">{display.detail}</p>
+                )}
               </div>
-              <Badge variant={cfg.variant}>{cfg.label}</Badge>
-              {upload.status === "processing" ? (
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-              ) : upload.status === "completed" ? (
+              {display.transcriptReady ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -168,6 +169,23 @@ const RecentUploads = ({ uploads, onDelete }: RecentUploadsProps) => {
                   onClick={() => navigate(`/transcript/${upload.id}`)}
                 >
                   <Eye className="h-3.5 w-3.5" /> View Transcript
+                </Button>
+              ) : display.busy ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+              ) : display.failedStep === "transcription" && onRetry ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5 text-xs"
+                  disabled={retryingNow}
+                  onClick={() => onRetry(upload.id, "transcription")}
+                >
+                  {retryingNow ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCw className="h-3.5 w-3.5" />
+                  )}
+                  Retry
                 </Button>
               ) : (
                 <Button
